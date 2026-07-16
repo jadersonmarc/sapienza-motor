@@ -32,6 +32,13 @@ pnpm build                # next build
 - `lib/content/` — `state-machine`, `store` (SQL cru sob withTenant), `transition`
   (billing na publicação), `regenerate` (limite).
 - `lib/channels/` — interface `Channel` + impls (blog/instagram/linkedin) + `MockChannel` + registry (tier gate).
+- `lib/brand/` — renderer de imagem on-brand (`next/og`/Satori, extraído de spa-sapienza):
+  `tokens` (fonte única sRGB), `formats`, `fonts` (TTFs em `assets/fonts`), `render`,
+  `compose` (entrada→arquétipo), `templates/*` (capa/conceito/diagrama/carrossel/bastidores +
+  signature), `pillar` (pilar texto livre → tratamento), `social-image` (compõe+rende+sobe no R2).
+  Floor: contraste AA, guarda anti-cor-solta (só `tokens`), determinismo do PNG.
+- `lib/storage/` — R2/S3 (`s3` upload/list, `keys` chaves por finalidade). Seam: sem env S3_*, publica sem imagem.
+- `app/api/og` — render on-demand (preview do composer; público, cacheado por URL).
 - `lib/provisioning.ts` — consumer do outbox (SubscriptionActivated{motor} → migrations);
   `catchUp` roda no boot (`pnpm provision`, `scripts/provision.ts`).
 - `app/api/v1/*` — API do produto (JWT do core via `lib/api/http.ts`): `content`
