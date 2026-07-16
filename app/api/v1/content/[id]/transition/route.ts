@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db"
 import { canOperate } from "@/lib/platform/gating"
 import { contentTransition } from "@/lib/content/transition"
 import { TransitionError, type ContentStatus } from "@/lib/content/state-machine"
+import { assertPublishAllowed, PublishCapError } from "@/lib/content/quota"
 
 export const runtime = "nodejs"
 
@@ -20,6 +21,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const to = body.to as ContentStatus | undefined
   if (!to) return json(400, { error: "to required" })
   try {
+    // Este é o outro caminho que fatura (published sem canais) — o cap vale igual.
+    if (to === "published") await assertPublishAllowed(sql, a.tenantId)
     await contentTransition(sql, a.tenantId, id, to, {
       actorId: a.userId,
       scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : undefined,
@@ -27,6 +30,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     })
   } catch (e) {
     if (e instanceof TransitionError) return json(409, { error: e.message })
+    if (e instanceof PublishCapError) return json(409, { error: e.message })
     throw e
   }
   return json(200, { ok: true })

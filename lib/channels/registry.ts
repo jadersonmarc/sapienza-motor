@@ -3,6 +3,7 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { channelLimit } from "@/lib/platform/gating"
 import { encryptSecret, decryptSecret } from "@/lib/platform/crypto"
 import { contentTransition } from "@/lib/content/transition"
+import { assertPublishAllowed } from "@/lib/content/quota"
 import type { Channel, Platform } from "./types"
 import {
   BlogChannel,
@@ -148,6 +149,11 @@ export async function publishItem(
       return rows.map((r) => ({ platform: r.platform, url: r.post_url }))
     })
   }
+
+  // Cap rígido: barra AQUI, antes de qualquer canal receber post. Dentro do
+  // contentTransition seria tarde — o post externo é irreversível. Republicação
+  // (acima) não passa por aqui: não posta nem fatura de novo.
+  await assertPublishAllowed(sql, tenantId)
 
   const results: { platform: Platform; url: string }[] = []
   const failures: { platform: Platform; error: string }[] = []

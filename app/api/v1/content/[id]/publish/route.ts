@@ -4,6 +4,7 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
 import { publishItem, PartialPublishError } from "@/lib/channels/registry"
 import { TransitionError } from "@/lib/content/state-machine"
+import { assertPublishAllowed, PublishCapError } from "@/lib/content/quota"
 import { generateAndStoreCover, isImageConfigured } from "@/lib/brand/social-image"
 
 export const runtime = "nodejs"
@@ -31,6 +32,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const sql = getDb()
   if (!(await canOperate(sql, a.tenantId))) return json(403, { error: "subscription not active" })
 
+  // Antes de renderizar a capa e subir no R2: se o cap barra, esse trabalho seria
+  // jogado fora. O publishItem checa de novo (protege também o cron).
+  try {
+    await assertPublishAllowed(sql, a.tenantId)
+  } catch (e) {
+    if (e instanceof PublishCapError) return json(409, { error: e.message })
+    throw e
+  }
+
   const body = (await req.json().catch(() => ({}))) as { imageUrl?: string }
   let imageUrl = body.imageUrl
 
@@ -48,6 +58,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return json(200, { published: results, failures: [] })
   } catch (e) {
     if (e instanceof TransitionError) return json(409, { error: e.message })
+    if (e instanceof PublishCapError) return json(409, { error: e.message })
     if (e instanceof PartialPublishError) {
       // Publicou em algum canal: a peça está no ar e já foi faturada, então 5xx
       // enganaria o cliente. Devolve o que saiu e o que falhou — os canais que
