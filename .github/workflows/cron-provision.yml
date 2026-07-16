@@ -1,0 +1,17 @@
+name: Cron · provisionar (drenar outbox)
+
+# Drena o outbox (SubscriptionActivated{motor} → migrations de tenant) p/ pegar
+# ativações feitas enquanto o serviço já roda. A cada 10 min.
+# Secrets: MOTOR_URL, WEBHOOK_SECRET.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.MOTOR_URL }}/api/cron/provision" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"

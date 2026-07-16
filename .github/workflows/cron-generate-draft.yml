@@ -1,0 +1,23 @@
+name: Cron · gerar rascunho editorial
+
+# Gera 1 peça em draft por tenant Motor ativo (renovação de tema). Exige IA no
+# serviço (ANTHROPIC_API_KEY). Seg/Qua/Sex 11:00 UTC (08h BRT).
+# Secrets: MOTOR_URL, WEBHOOK_SECRET.
+on:
+  schedule:
+    - cron: "0 11 * * 1,3,5"
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Tema/brief opcional para a geração"
+        required: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.MOTOR_URL }}/api/cron/generate-draft" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}" \
+            -H "content-type: application/json" \
+            -d "{\"prompt\":\"${{ github.event.inputs.prompt }}\"}"

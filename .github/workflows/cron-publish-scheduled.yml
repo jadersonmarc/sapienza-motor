@@ -1,0 +1,16 @@
+name: Cron · publicar agendados
+
+# Publica peças 'scheduled' cujo horário chegou. A cada 15 min.
+# Secrets: MOTOR_URL, WEBHOOK_SECRET.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.MOTOR_URL }}/api/cron/publish-scheduled" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"
