@@ -47,6 +47,30 @@ export function publicUrlForKey(key: string): string {
   return `${S3_PUBLIC_URL!.replace(/\/$/, "")}/${key}`
 }
 
+/**
+ * A URL aponta para o nosso bucket público?
+ *
+ * Allowlist para tudo que o servidor vai BUSCAR a partir de entrada do usuário
+ * (hoje: o `?image=` do /api/og, que o Satori resolve server-side). Sem isto a
+ * rota é um SSRF: qualquer URL interna da VPS seria buscada e cacheada.
+ *
+ * Compara origin + prefixo de path, então um host que apenas *comece* com o
+ * nosso (`cdn.exemplo.com.evil.com`) não passa. Lê `process.env` na hora em vez
+ * da const de módulo para não congelar o valor no import.
+ */
+export function isPublicAssetUrl(candidate: string): boolean {
+  const base = process.env.S3_PUBLIC_URL
+  if (!base) return false
+  try {
+    const url = new URL(candidate)
+    const allowed = new URL(base.replace(/\/$/, "") + "/")
+    if (url.protocol !== allowed.protocol || url.host !== allowed.host) return false
+    return url.pathname.startsWith(allowed.pathname)
+  } catch {
+    return false // relativa ou malformada
+  }
+}
+
 // Sobe um objeto e retorna a URL pública (S3_PUBLIC_URL/key).
 export async function uploadObject(
   key: string,
