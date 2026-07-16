@@ -1,4 +1,4 @@
-import type { Tx } from "@/lib/db"
+import type { Tx, Json } from "@/lib/db"
 import type { ContentStatus } from "@/lib/content/state-machine"
 
 // Store tenant-scoped (queries sob withTenant; sem tenant_id, sem prefixo de schema —
@@ -23,6 +23,8 @@ export type NewItem = {
   excerpt?: string
   pilar?: string | null
   authorId?: string | null
+  /** SEO (ex.: { keywords: string[] }) — persistido no jsonb da revisão. */
+  seo?: Record<string, unknown>
 }
 
 /** Cria uma peça em draft + 1ª revisão, apontando current_revision_id. */
@@ -32,9 +34,10 @@ export async function createItem(tx: Tx, input: NewItem): Promise<ContentItem> {
     VALUES (${input.slug}, ${input.pilar ?? null}, ${input.authorId ?? null})
     RETURNING *
   `) as unknown as ContentItem[]
+  // jsonb via tx.json (nunca JSON.stringify::jsonb — re-encoda e quebra o payload).
   const [rev] = (await tx`
-    INSERT INTO content_revisions (content_item_id, title, body_markdown, excerpt, ai_generated, author_id)
-    VALUES (${item.id}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, false, ${input.authorId ?? null})
+    INSERT INTO content_revisions (content_item_id, title, body_markdown, excerpt, seo, ai_generated, author_id)
+    VALUES (${item.id}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, ${tx.json((input.seo ?? {}) as Json)}, false, ${input.authorId ?? null})
     RETURNING id
   `) as unknown as { id: string }[]
   await tx`UPDATE content_items SET current_revision_id = ${rev.id}, updated_at = now() WHERE id = ${item.id}`
@@ -45,6 +48,78 @@ export async function createItem(tx: Tx, input: NewItem): Promise<ContentItem> {
 export async function getItem(tx: Tx, id: string): Promise<ContentItem | null> {
   const rows = (await tx`SELECT * FROM content_items WHERE id = ${id}`) as unknown as ContentItem[]
   return rows[0] ?? null
+}
+
+export type CurrentRevision = {
+  id: string
+  title: string
+  body_markdown: string
+  excerpt: string | null
+  seo: Record<string, unknown>
+  pilar: string | null
+  slug: string
+}
+
+/** Peça + sua revisão atual (título/corpo/excerpt/seo) — base dos geradores. */
+export async function getItemWithRevision(tx: Tx, itemId: string): Promise<CurrentRevision | null> {
+  const rows = (await tx`
+    SELECT cr.id, cr.title, cr.body_markdown, cr.excerpt, cr.seo, ci.pilar, ci.slug
+      FROM content_items ci
+      JOIN content_revisions cr ON cr.id = ci.current_revision_id
+     WHERE ci.id = ${itemId}
+  `) as unknown as CurrentRevision[]
+  return rows[0] ?? null
+}
+
+/** Cria/atualiza o rascunho social (status draft) de uma plataforma — um por
+ *  plataforma (remove os drafts anteriores da mesma plataforma). */
+export async function upsertSocialDraft(
+  tx: Tx,
+  input: { itemId: string; revisionId?: string | null; platform: string; body: string; hashtags: string[] },
+): Promise<string> {
+  await tx`
+    DELETE FROM social_drafts
+     WHERE content_item_id = ${input.itemId} AND platform = ${input.platform} AND status = 'draft'
+  `
+  const [row] = (await tx`
+    INSERT INTO social_drafts (content_item_id, revision_id, platform, body, hashtags, status)
+    VALUES (${input.itemId}, ${input.revisionId ?? null}, ${input.platform}, ${input.body}, ${tx.json(input.hashtags)}, 'draft')
+    RETURNING id
+  `) as unknown as { id: string }[]
+  return row.id
+}
+
+export type SocialDraft = { platform: string; body: string; hashtags: string[]; status: string }
+
+/** Rascunho social mais recente ainda não enviado (draft|approved) de uma plataforma. */
+export async function socialDraftFor(tx: Tx, itemId: string, platform: string): Promise<SocialDraft | null> {
+  const rows = (await tx`
+    SELECT platform, body, hashtags, status FROM social_drafts
+     WHERE content_item_id = ${itemId} AND platform = ${platform} AND status IN ('draft','approved')
+     ORDER BY created_at DESC LIMIT 1
+  `) as unknown as SocialDraft[]
+  return rows[0] ?? null
+}
+
+export async function insertAnalysis(
+  tx: Tx,
+  input: { itemId: string; revisionId?: string | null; type: string; payload: unknown; model?: string | null },
+): Promise<string> {
+  const [row] = (await tx`
+    INSERT INTO ai_analyses (content_item_id, revision_id, type, payload, model)
+    VALUES (${input.itemId}, ${input.revisionId ?? null}, ${input.type}, ${tx.json((input.payload ?? {}) as Json)}, ${input.model ?? null})
+    RETURNING id
+  `) as unknown as { id: string }[]
+  return row.id
+}
+
+export type Analysis = { type: string; payload: unknown; model: string | null; created_at: string }
+
+export async function listAnalyses(tx: Tx, itemId: string): Promise<Analysis[]> {
+  return (await tx`
+    SELECT type, payload, model, created_at FROM ai_analyses
+     WHERE content_item_id = ${itemId} ORDER BY created_at DESC
+  `) as unknown as Analysis[]
 }
 
 /** Adiciona uma revisão (gerada por IA = regeneração); atualiza current_revision_id

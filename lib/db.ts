@@ -14,3 +14,5 @@ export function getDb(): ReturnType<typeof postgres> {
 
 export type Sql = postgres.Sql
 export type Tx = postgres.TransactionSql
+/** Valor serializável para jsonb via `tx.json(...)`. */
+export type Json = postgres.JSONValue

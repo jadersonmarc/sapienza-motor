@@ -36,6 +36,7 @@ export async function POST(req: Request): Promise<Response> {
       title: draft.title,
       bodyMarkdown: draft.bodyMarkdown,
       excerpt: draft.excerpt,
+      seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
       authorId: a.userId,
     }),
   )
