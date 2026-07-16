@@ -14,6 +14,8 @@ export type ContentItem = {
   scheduled_at: string | null
   published_at: string | null
   regen_count: number
+  /** título da revisão atual (presente em listItems; ausente em getItem). */
+  title?: string | null
 }
 
 export type NewItem = {
@@ -178,7 +180,11 @@ export async function listExpiredReview(tx: Tx): Promise<ContentItem[]> {
 }
 
 export async function listItems(tx: Tx, limit = 100): Promise<ContentItem[]> {
-  return (await tx`SELECT * FROM content_items ORDER BY updated_at DESC LIMIT ${limit}`) as unknown as ContentItem[]
+  return (await tx`
+    SELECT ci.*, cr.title FROM content_items ci
+      LEFT JOIN content_revisions cr ON cr.id = ci.current_revision_id
+     ORDER BY ci.updated_at DESC LIMIT ${limit}
+  `) as unknown as ContentItem[]
 }
 
 /** Títulos das revisões atuais (para o cron evitar repetir temas). */
