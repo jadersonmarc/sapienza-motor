@@ -86,6 +86,32 @@ maybe("motor API", () => {
     expect(await usage(sql, t, "peca")).toBe(1)
   })
 
+  it("social: PUT salva a legenda editada e GET a devolve", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t)
+    const create = await import("@/app/api/v1/content/route")
+    const post = await create.POST(req("POST", "/api/v1/content", tok, { prompt: "tema social" }))
+    const { id } = (await post.json()) as { id: string }
+
+    const social = await import("@/app/api/v1/content/[id]/social/route")
+    const ctx = { params: Promise.resolve({ id }) }
+    const put = await social.PUT(
+      req("PUT", `/api/v1/content/${id}/social`, tok, {
+        platform: "instagram",
+        body: "Legenda editada à mão",
+        hashtags: ["#pme", "crm"],
+      }),
+      ctx,
+    )
+    expect(put.status).toBe(200)
+
+    const get = await social.GET(req("GET", `/api/v1/content/${id}/social`, tok), ctx)
+    const data = (await get.json()) as { drafts: { platform: string; body: string; hashtags: string[] }[] }
+    const ig = data.drafts.find((d) => d.platform === "instagram")!
+    expect(ig.body).toBe("Legenda editada à mão")
+    expect(ig.hashtags).toEqual(["pme", "crm"]) // # removido, normalizado
+  })
+
   it("cron generate-draft exige secret e IA (503 sem ANTHROPIC_API_KEY)", async () => {
     const { POST } = await import("@/app/api/cron/generate-draft/route")
     const noAuth = await POST(req("POST", "/api/cron/generate-draft"))
