@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "provision": "tsx scripts/provision.ts",
     "test": "vitest run"
   },
   "dependencies": {

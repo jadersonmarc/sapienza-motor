@@ -38,6 +38,15 @@ export async function tierOf(sql: Sql, tenantId: string): Promise<Tier | null> {
   return a.status === "active" ? a.tier : null
 }
 
+/** Tenants com assinatura Motor ativa (para varreduras dos crons). */
+export async function activeTenants(sql: Sql): Promise<string[]> {
+  const rows = (await sql`
+    SELECT tenant_id FROM public.subscriptions
+    WHERE produto = ${PRODUTO} AND status = 'active'
+  `) as unknown as { tenant_id: string }[]
+  return rows.map((r) => r.tenant_id)
+}
+
 /** Regras do produto (public.product_rules.rules jsonb), materializadas do pricing.yaml. */
 export async function productRules(sql: Sql): Promise<Record<string, unknown>> {
   const rows = (await sql`
