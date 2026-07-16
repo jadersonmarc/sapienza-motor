@@ -7,7 +7,7 @@ import {
   runAnalyzer,
   AiNotConfiguredError,
 } from "./analyzers"
-import { generateDraft } from "./generate"
+import { generateDraft, themeGuidance } from "./generate"
 
 // Testa as partes puras (prompt builders, listas, validação) e o caminho de
 // fallback (sem ANTHROPIC_API_KEY). O caminho com IA é seam (não testado aqui).
@@ -69,5 +69,24 @@ describe("generateDraft fallback", () => {
     expect(d.title).toContain("meu tema")
     expect(d.slug).toContain("meu-tema")
     expect(d.keywords).toEqual([])
+  })
+})
+
+describe("themeGuidance (renovação de tema do cron)", () => {
+  it("sempre pede um tema novo, mesmo sem contexto", () => {
+    const g = themeGuidance()
+    expect(g).toMatch(/tema NOVO/i)
+    expect(g).not.toMatch(/JÁ PUBLICADOS/)
+  })
+  it("lista títulos a evitar e sementes, com limites (40/12)", () => {
+    const g = themeGuidance({
+      avoidTitles: Array.from({ length: 60 }, (_, i) => `T${i}`),
+      themeSeeds: Array.from({ length: 30 }, (_, i) => `S${i}`),
+    })
+    expect(g).toMatch(/JÁ PUBLICADOS/)
+    expect(g).toContain("T39")
+    expect(g).not.toContain("T40")
+    expect(g).toContain("S11")
+    expect(g).not.toContain("S12")
   })
 })

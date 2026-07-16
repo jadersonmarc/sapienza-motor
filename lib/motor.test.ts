@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { randomUUID } from "node:crypto"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
 import { withTenant, schemaName } from "@/lib/platform/tenancy"
-import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses } from "@/lib/content/store"
+import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTitles } from "@/lib/content/store"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
 import { connectChannel, publishItem, ChannelLimitError, type Drivers } from "@/lib/channels/registry"
@@ -112,6 +112,17 @@ maybe("motor data plane", () => {
     await publishItem(sql, t, item.id, drivers)
     expect(mock.published).toHaveLength(1)
     expect(mock.published[0].input.body).toBe("LEGENDA IG\n\n#pme #crm")
+  })
+
+  it("cron: listItemTitles devolve títulos para a renovação de tema, escopado ao tenant", async () => {
+    const a = await provisionTenant(sql, "pro")
+    const b = await provisionTenant(sql, "pro")
+    await withTenant(sql, a, (tx) => createItem(tx, { slug: "t1", title: "Título A1", bodyMarkdown: "x" }))
+    await withTenant(sql, a, (tx) => createItem(tx, { slug: "t2", title: "Título A2", bodyMarkdown: "x" }))
+    const titlesA = await withTenant(sql, a, (tx) => listItemTitles(tx))
+    const titlesB = await withTenant(sql, b, (tx) => listItemTitles(tx))
+    expect(titlesA.sort()).toEqual(["Título A1", "Título A2"])
+    expect(titlesB).toEqual([]) // isolado
   })
 
   it("análises: insertAnalysis persiste e listAnalyses lê (payload jsonb intacto)", async () => {

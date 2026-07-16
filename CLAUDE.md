@@ -48,7 +48,8 @@ pnpm build                # next build
 - `app/api/v1/*` — API do produto (JWT do core via `lib/api/http.ts`): `content`
   (list/get/create), `content/[id]/{transition,regenerate,publish}`, `channels`, `setup`.
 - `app/api/cron/*` — route handlers protegidos por `x-webhook-secret` (`lib/platform/webhook.ts`):
-  `publish-scheduled`, `close-approval-window` (janela 48h), `provision` (drena o outbox).
+  `publish-scheduled`, `close-approval-window` (janela 48h), `provision` (drena o outbox),
+  `generate-draft` (gera 1 peça em draft por tenant ativo; renovação de tema via themeGuidance; exige IA).
 - `lib/testutil.ts` — sobe o subconjunto do control plane + trigger de uso + provisiona tenants.
 
 ## Convenções

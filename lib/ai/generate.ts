@@ -33,8 +33,26 @@ const SYSTEM =
   "Baixada Fluminense. Escreva em pt-BR correto e natural, com acentuação adequada. " +
   "Conteúdo original, útil e específico — sem clichês de IA. Não invente dados ou clientes."
 
-export async function generateDraft(prompt: string): Promise<Draft> {
-  const theme = prompt.trim() || "Rascunho"
+// Renovação de tema (cron editorial): evita repetir o que já existe e semeia
+// ângulos novos. Adaptado de spa-sapienza/lib/ai/draft.themeGuidance.
+export type DraftThemeContext = { avoidTitles?: string[]; themeSeeds?: string[] }
+
+export function themeGuidance(ctx?: DraftThemeContext): string {
+  const avoid = (ctx?.avoidTitles ?? []).filter(Boolean).slice(0, 40)
+  const seeds = (ctx?.themeSeeds ?? []).filter(Boolean).slice(0, 12)
+  let block = ""
+  if (avoid.length) {
+    block += `\n\nTEMAS JÁ PUBLICADOS — NÃO repita nem reescreva variações destes:\n- ` + avoid.join("\n- ")
+  }
+  if (seeds.length) {
+    block += `\n\nÁREAS SUGERIDAS para explorar (escolha UMA e aprofunde com ângulo próprio):\n- ` + seeds.join("\n- ")
+  }
+  block += "\n\nEscolha um tema NOVO, específico e claramente diferente dos já publicados."
+  return block
+}
+
+export async function generateDraft(prompt: string, ctx?: DraftThemeContext): Promise<Draft> {
+  const theme = prompt.trim() || "Conteúdo para PMEs da Baixada Fluminense"
 
   if (!isAiConfigured()) {
     return {
@@ -50,7 +68,8 @@ export async function generateDraft(prompt: string): Promise<Draft> {
     `Escreva um artigo de blog a partir do tema abaixo.\n\nTEMA: ${theme}\n\n` +
     "Requisitos: título objetivo; slug em kebab-case; excerpt curto; corpo em Markdown " +
     "(use ## para subtítulos, listas quando ajudar; 600–900 palavras); 5–8 keywords de SEO. " +
-    "Inclua um CTA leve para falar com a Sapienza Labs no WhatsApp ao final."
+    "Inclua um CTA leve para falar com a Sapienza Labs no WhatsApp ao final." +
+    themeGuidance(ctx)
 
   const { data } = await callStructured<Draft>({ system: SYSTEM, user, schema: SCHEMA, maxTokens: 16000 })
   return {

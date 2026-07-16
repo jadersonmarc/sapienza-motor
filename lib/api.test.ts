@@ -86,6 +86,20 @@ maybe("motor API", () => {
     expect(await usage(sql, t, "peca")).toBe(1)
   })
 
+  it("cron generate-draft exige secret e IA (503 sem ANTHROPIC_API_KEY)", async () => {
+    const { POST } = await import("@/app/api/cron/generate-draft/route")
+    const noAuth = await POST(req("POST", "/api/cron/generate-draft"))
+    expect(noAuth.status).toBe(401)
+
+    const withSecret = new Request("http://motor.local/api/cron/generate-draft", {
+      method: "POST",
+      headers: { "x-webhook-secret": "cron-secret", "content-type": "application/json" },
+      body: JSON.stringify({}),
+    })
+    const res = await POST(withSecret) // sem ANTHROPIC_API_KEY no ambiente de teste
+    expect(res.status).toBe(503)
+  })
+
   it("cron close-approval-window exige secret e promove in_review vencido", async () => {
     const t = await provisionTenant(sql, "pro")
     const item = await withTenant(sql, t, (tx) => createItem(tx, { slug: "cron", title: "C", bodyMarkdown: "x" }))

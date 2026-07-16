@@ -171,3 +171,13 @@ export async function listExpiredReview(tx: Tx): Promise<ContentItem[]> {
 export async function listItems(tx: Tx, limit = 100): Promise<ContentItem[]> {
   return (await tx`SELECT * FROM content_items ORDER BY updated_at DESC LIMIT ${limit}`) as unknown as ContentItem[]
 }
+
+/** Títulos das revisões atuais (para o cron evitar repetir temas). */
+export async function listItemTitles(tx: Tx, limit = 40): Promise<string[]> {
+  const rows = (await tx`
+    SELECT cr.title FROM content_items ci
+      JOIN content_revisions cr ON cr.id = ci.current_revision_id
+     ORDER BY ci.created_at DESC LIMIT ${limit}
+  `) as unknown as { title: string }[]
+  return rows.map((r) => r.title)
+}
