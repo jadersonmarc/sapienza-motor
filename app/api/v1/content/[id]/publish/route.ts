@@ -2,7 +2,7 @@ import { authed, isResponse, json } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
-import { publishItem } from "@/lib/channels/registry"
+import { publishItem, PartialPublishError } from "@/lib/channels/registry"
 import { TransitionError } from "@/lib/content/state-machine"
 import { generateAndStoreCover, isImageConfigured } from "@/lib/brand/social-image"
 
@@ -45,9 +45,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   try {
     const results = await publishItem(sql, a.tenantId, id, undefined, imageUrl)
-    return json(200, { published: results })
+    return json(200, { published: results, failures: [] })
   } catch (e) {
     if (e instanceof TransitionError) return json(409, { error: e.message })
+    if (e instanceof PartialPublishError) {
+      // Publicou em algum canal: a peça está no ar e já foi faturada, então 5xx
+      // enganaria o cliente. Devolve o que saiu e o que falhou — os canais que
+      // falharam não são retentados; precisam de ação humana.
+      if (e.published.length > 0) return json(200, { published: e.published, failures: e.failures })
+      // Nada saiu: falha de upstream de verdade. Não faturou; o cron vai retentar.
+      return json(502, { error: e.message, published: [], failures: e.failures })
+    }
     throw e
   }
 }

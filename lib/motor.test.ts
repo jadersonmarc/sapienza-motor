@@ -5,10 +5,24 @@ import { withTenant, schemaName } from "@/lib/platform/tenancy"
 import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTitles } from "@/lib/content/store"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
-import { connectChannel, publishItem, ChannelLimitError, type Drivers } from "@/lib/channels/registry"
+import { connectChannel, publishItem, ChannelLimitError, PartialPublishError, type Drivers } from "@/lib/channels/registry"
 import { MockChannel } from "@/lib/channels/mock"
 import { processOutbox } from "@/lib/provisioning"
 import type { Sql } from "@/lib/db"
+import type { Channel, Platform, PublishInput } from "@/lib/channels/types"
+
+/** Canal que sempre falha — simula API de rede fora do ar. Conta as tentativas. */
+class FailingChannel implements Channel {
+  attempts = 0
+  constructor(
+    readonly platform: Platform,
+    private readonly message: string,
+  ) {}
+  async publish(_input: PublishInput): Promise<{ url: string }> {
+    this.attempts++
+    throw new Error(this.message)
+  }
+}
 
 const dsn = process.env.TEST_DATABASE_URL
 const maybe = dsn ? describe : describe.skip
@@ -111,6 +125,48 @@ maybe("motor data plane", () => {
     expect(mock.published).toHaveLength(1) // não re-postou
     const drafts = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM social_drafts WHERE content_item_id=${item.id}`)) as unknown as { n: number }[]
     expect(drafts[0].n).toBe(1)
+    expect(await usage(sql, t, "peca")).toBe(1)
+  })
+
+  // Regressão: o loop de canais publicava um a um e só transicionava no fim, então
+  // uma falha no meio deixava published_at NULL com posts já no ar — e o cron
+  // repostava nos canais bons a cada ciclo, para sempre.
+  it("publishItem: falha parcial não reposta no canal que deu certo nem refatura", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const item = await newItem(t, "falha-parcial")
+    await connectChannel(sql, t, "blog")
+    await connectChannel(sql, t, "instagram")
+    const bom = new MockChannel("blog")
+    const quebrado = new FailingChannel("instagram", "instagram: 500 upstream")
+    const drivers = { blog: bom, instagram: quebrado, linkedin: bom } as unknown as Drivers
+
+    // Ciclo 1: blog publica, instagram falha → erro parcial, mas a peça já é pública.
+    await expect(publishItem(sql, t, item.id, drivers)).rejects.toThrow(PartialPublishError)
+    expect(bom.published).toHaveLength(1)
+    expect(await usage(sql, t, "peca")).toBe(1) // faturou uma vez, não zero
+
+    // Ciclo 2 (o retry do cron): não pode repostar no blog nem faturar de novo.
+    const segundo = await publishItem(sql, t, item.id, drivers)
+    expect(bom.published).toHaveLength(1)
+    expect(await usage(sql, t, "peca")).toBe(1)
+    expect(segundo.map((r) => r.platform)).toEqual(["blog"])
+    expect(quebrado.attempts).toBe(1) // já publicada → nem tenta de novo
+  })
+
+  it("publishItem: todos os canais falhando não fatura e permite retry completo", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const item = await newItem(t, "falha-total")
+    await connectChannel(sql, t, "blog")
+    const quebrado = new FailingChannel("blog", "blog: fora do ar")
+    const drivers = { blog: quebrado, instagram: quebrado, linkedin: quebrado } as unknown as Drivers
+
+    await expect(publishItem(sql, t, item.id, drivers)).rejects.toThrow(PartialPublishError)
+    expect(await usage(sql, t, "peca")).toBe(0) // nada publicado → nada faturado
+
+    // O canal voltou: o retry publica a peça inteira e fatura uma vez.
+    const bom = new MockChannel("blog")
+    const res = await publishItem(sql, t, item.id, { blog: bom } as unknown as Drivers)
+    expect(res).toHaveLength(1)
     expect(await usage(sql, t, "peca")).toBe(1)
   })
 
