@@ -5,6 +5,7 @@ import { canOperate } from "@/lib/platform/gating"
 import { createItem, listItems } from "@/lib/content/store"
 import { generateDraft } from "@/lib/ai/generate"
 import { slugify } from "@/lib/content/slug"
+import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib/content/quota"
 
 export const runtime = "nodejs"
 
@@ -28,7 +29,22 @@ export async function POST(req: Request): Promise<Response> {
   const prompt = (body.prompt ?? "").trim()
   if (!prompt) return json(400, { error: "prompt required" })
 
-  const draft = await generateDraft(prompt)
+  // Debita a cota antes de chamar o modelo — é a chamada que custa.
+  try {
+    await reserveGeneration(sql, a.tenantId)
+  } catch (e) {
+    if (e instanceof GenerationQuotaError) return json(409, { error: e.message })
+    throw e
+  }
+
+  let draft
+  try {
+    draft = await generateDraft(prompt)
+  } catch (e) {
+    await refundGeneration(sql, a.tenantId) // não gerou: devolve a cota
+    throw e
+  }
+
   const slug = `${draft.slug || slugify(prompt)}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
     createItem(tx, {

@@ -68,14 +68,19 @@ export async function setupControlPlane(sql: Sql): Promise<void> {
 }
 
 /** Cria tenant_<id>, aplica migrations do Motor e semeia uma assinatura motor ativa. */
-export async function provisionTenant(sql: Sql, tier: "start" | "pro" | "scale" = "pro"): Promise<string> {
+export async function provisionTenant(
+  sql: Sql,
+  tier: "start" | "pro" | "scale" = "pro",
+  opts: { hardCap?: boolean } = {},
+): Promise<string> {
   const tid = randomUUID()
   await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS "${schemaName(tid)}"`)
   await applyTenantMigrations(sql, tid, tenantMigrations())
   await sql`
-    INSERT INTO public.subscriptions (tenant_id, produto, tier, status)
-    VALUES (${tid}::uuid, 'motor', ${tier}, 'active')
-    ON CONFLICT (tenant_id, produto) DO UPDATE SET tier = EXCLUDED.tier, status = 'active'
+    INSERT INTO public.subscriptions (tenant_id, produto, tier, status, hard_cap)
+    VALUES (${tid}::uuid, 'motor', ${tier}, 'active', ${opts.hardCap ?? false})
+    ON CONFLICT (tenant_id, produto) DO UPDATE
+      SET tier = EXCLUDED.tier, status = 'active', hard_cap = EXCLUDED.hard_cap
   `
   return tid
 }

@@ -6,6 +6,13 @@ import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTi
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
 import { connectChannel, publishItem, ChannelLimitError, PartialPublishError, type Drivers } from "@/lib/channels/registry"
+import {
+  reserveGeneration,
+  refundGeneration,
+  generationQuota,
+  GenerationQuotaError,
+  PublishCapError,
+} from "@/lib/content/quota"
 import { MockChannel } from "@/lib/channels/mock"
 import { processOutbox } from "@/lib/provisioning"
 import type { Sql } from "@/lib/db"
@@ -52,6 +59,76 @@ maybe("motor data plane", () => {
     await contentTransition(sql, t, item.id, "draft")
     await contentTransition(sql, t, item.id, "published")
     expect(await usage(sql, t, "peca")).toBe(1)
+  })
+
+  // Teto de custo: faturamos por peça publicada, mas gerar chama o modelo e antes
+  // disto era ilimitado — dava para queimar centenas de chamadas e publicar 12.
+  it("cota de geração: start gera 12 e a 13ª é bloqueada", async () => {
+    const t = await provisionTenant(sql, "start") // incluso = 12
+    for (let i = 0; i < 12; i++) await reserveGeneration(sql, t)
+    expect(await usage(sql, t, "geracao")).toBe(12)
+    await expect(reserveGeneration(sql, t)).rejects.toThrow(GenerationQuotaError)
+    expect(await usage(sql, t, "geracao")).toBe(12) // a bloqueada não debitou
+  })
+
+  it("cota de geração: o limite acompanha o tier (pro = 30)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    expect(await generationQuota(sql, t)).toEqual({ used: 0, limit: 30, remaining: 30 })
+    await reserveGeneration(sql, t)
+    expect(await generationQuota(sql, t)).toEqual({ used: 1, limit: 30, remaining: 29 })
+  })
+
+  // O trigger do core soma count + EXCLUDED.count, então -1 estorna: o cliente não
+  // perde cota quando o modelo falha por erro nosso.
+  it("cota de geração: falha do modelo estorna a reserva", async () => {
+    const t = await provisionTenant(sql, "start")
+    await reserveGeneration(sql, t)
+    expect(await usage(sql, t, "geracao")).toBe(1)
+    await refundGeneration(sql, t)
+    expect(await usage(sql, t, "geracao")).toBe(0)
+  })
+
+  // A cota é controle de custo, não item de fatura: o fechamento junta
+  // usage_counters por uc.metric = plans.metric, e o metric do plano é 'peca'.
+  it("cota de geração: contada em usage_counters mas fora da fatura", async () => {
+    const t = await provisionTenant(sql, "start")
+    await reserveGeneration(sql, t)
+    await reserveGeneration(sql, t)
+    expect(await usage(sql, t, "geracao")).toBe(2)
+    expect(await usage(sql, t, "peca")).toBe(0) // nada a faturar: nada foi publicado
+    const rows = (await sql`
+      SELECT metric FROM public.usage_counters WHERE tenant_id = ${t}::uuid ORDER BY metric
+    `) as unknown as { metric: string }[]
+    expect(rows.map((r) => r.metric)).toEqual(["geracao"])
+  })
+
+  it("hard_cap: bloqueia publicação ao atingir o incluso, antes de postar no canal", async () => {
+    const t = await provisionTenant(sql, "start", { hardCap: true }) // incluso = 12
+    await connectChannel(sql, t, "blog")
+    const mock = new MockChannel("blog")
+    const drivers = { blog: mock } as unknown as Drivers
+
+    // Chega ao incluso publicando de verdade (12 peças).
+    for (let i = 0; i < 12; i++) {
+      const item = await newItem(t, `cap-${i}`)
+      await contentTransition(sql, t, item.id, "published")
+    }
+    expect(await usage(sql, t, "peca")).toBe(12)
+
+    // A 13ª: barra antes de o canal receber qualquer coisa e não fatura.
+    const extra = await newItem(t, "cap-extra")
+    await expect(publishItem(sql, t, extra.id, drivers)).rejects.toThrow(PublishCapError)
+    expect(mock.published).toHaveLength(0)
+    expect(await usage(sql, t, "peca")).toBe(12)
+  })
+
+  it("sem hard_cap: excedente publica normalmente (é receita, não bloqueio)", async () => {
+    const t = await provisionTenant(sql, "start") // hardCap = false
+    for (let i = 0; i < 13; i++) {
+      const item = await newItem(t, `over-${i}`)
+      await contentTransition(sql, t, item.id, "published")
+    }
+    expect(await usage(sql, t, "peca")).toBe(13) // 1 acima do incluso, faturado como excedente
   })
 
   it("isolamento: conteúdo não vaza entre tenants", async () => {

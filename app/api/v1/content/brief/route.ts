@@ -5,6 +5,7 @@ import { canOperate } from "@/lib/platform/gating"
 import { createItem } from "@/lib/content/store"
 import { generateFromBrief } from "@/lib/ai/brief"
 import { slugify } from "@/lib/content/slug"
+import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib/content/quota"
 
 export const runtime = "nodejs"
 
@@ -26,13 +27,28 @@ export async function POST(req: Request): Promise<Response> {
   const objetivo = (body.objetivo ?? "").trim()
   if (!objetivo) return json(400, { error: "objetivo obrigatório" })
 
-  const draft = await generateFromBrief({
-    objetivo,
-    pontosChave: body.pontosChave,
-    publico: body.publico,
-    tom: body.tom,
-    pilar: body.pilar ?? null,
-  })
+  // Debita a cota antes de chamar o modelo — é a chamada que custa.
+  try {
+    await reserveGeneration(sql, a.tenantId)
+  } catch (e) {
+    if (e instanceof GenerationQuotaError) return json(409, { error: e.message })
+    throw e
+  }
+
+  let draft
+  try {
+    draft = await generateFromBrief({
+      objetivo,
+      pontosChave: body.pontosChave,
+      publico: body.publico,
+      tom: body.tom,
+      pilar: body.pilar ?? null,
+    })
+  } catch (e) {
+    await refundGeneration(sql, a.tenantId) // não gerou: devolve a cota
+    throw e
+  }
+
   const slug = `${draft.slug || slugify(objetivo) || "rascunho"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
     createItem(tx, {
