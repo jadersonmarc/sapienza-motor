@@ -59,8 +59,8 @@ export async function publishItem(
   drivers: Drivers = defaultDrivers(),
   imageUrl?: string,
 ): Promise<{ platform: Platform; url: string }[]> {
-  // Conteúdo atual + slug + canais, numa leitura tenant-scoped.
-  const { slug, title, body, alreadyPublished, channels } = await withTenant(sql, tenantId, async (tx) => {
+  // Conteúdo atual + slug + canais + rascunhos sociais, numa leitura tenant-scoped.
+  const { slug, title, body, alreadyPublished, channels, socialByPlatform } = await withTenant(sql, tenantId, async (tx) => {
     const [item] = (await tx`
       SELECT ci.slug, ci.published_at, cr.title, cr.body_markdown
         FROM content_items ci
@@ -71,14 +71,31 @@ export async function publishItem(
     const channels = (await tx`
       SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true
     `) as unknown as { platform: Platform; credentials_enc: string | null }[]
+    // Legendas sociais geradas (status draft|approved) — o publish as prefere ao markdown cru.
+    const drafts = (await tx`
+      SELECT DISTINCT ON (platform) platform, body, hashtags FROM social_drafts
+       WHERE content_item_id = ${itemId} AND status IN ('draft','approved')
+       ORDER BY platform, created_at DESC
+    `) as unknown as { platform: Platform; body: string; hashtags: string[] }[]
+    const socialByPlatform = new Map(drafts.map((d) => [d.platform, d]))
     return {
       slug: item.slug,
       title: item.title,
       body: item.body_markdown,
       alreadyPublished: item.published_at != null,
       channels,
+      socialByPlatform,
     }
   })
+
+  // Corpo por canal: IG/LinkedIn preferem a legenda social gerada (body + hashtags);
+  // o blog usa o markdown. Sem rascunho social, todos caem no markdown.
+  const bodyFor = (platform: Platform): string => {
+    const d = socialByPlatform.get(platform)
+    if (!d) return body
+    const tags = (d.hashtags ?? []).map((h) => `#${h}`).join(" ")
+    return tags ? `${d.body}\n\n${tags}` : d.body
+  }
 
   // Idempotente: uma peça já publicada não re-posta nos canais nem duplica
   // social_drafts (o billing já tem guard em published_at). Retorna o que foi enviado.
@@ -97,12 +114,13 @@ export async function publishItem(
     const driver = drivers[ch.platform]
     if (!driver) continue
     const creds = ch.credentials_enc ? decryptSecret(ch.credentials_enc) : null
-    const { url } = await driver.publish({ slug, title, body, imageUrl }, creds)
+    const channelBody = bodyFor(ch.platform)
+    const { url } = await driver.publish({ slug, title, body: channelBody, imageUrl }, creds)
     results.push({ platform: ch.platform, url })
     await withTenant(sql, tenantId, async (tx) => {
       await tx`
         INSERT INTO social_drafts (content_item_id, platform, body, status, image_url, post_url)
-        VALUES (${itemId}, ${ch.platform}, ${body}, 'sent', ${imageUrl ?? null}, ${url})
+        VALUES (${itemId}, ${ch.platform}, ${channelBody}, 'sent', ${imageUrl ?? null}, ${url})
       `
     })
   }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { randomUUID } from "node:crypto"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
 import { withTenant, schemaName } from "@/lib/platform/tenancy"
-import { createItem } from "@/lib/content/store"
+import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses } from "@/lib/content/store"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
 import { connectChannel, publishItem, ChannelLimitError, type Drivers } from "@/lib/channels/registry"
@@ -98,6 +98,32 @@ maybe("motor data plane", () => {
     const drafts = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM social_drafts WHERE content_item_id=${item.id}`)) as unknown as { n: number }[]
     expect(drafts[0].n).toBe(1)
     expect(await usage(sql, t, "peca")).toBe(1)
+  })
+
+  it("social: publish prefere a legenda social gerada (body + hashtags) ao markdown", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const item = await newItem(t, "social-pub")
+    await connectChannel(sql, t, "instagram")
+    await withTenant(sql, t, (tx) =>
+      upsertSocialDraft(tx, { itemId: item.id, platform: "instagram", body: "LEGENDA IG", hashtags: ["pme", "crm"] }),
+    )
+    const mock = new MockChannel("instagram")
+    const drivers = { blog: mock, instagram: mock, linkedin: mock } as unknown as Drivers
+    await publishItem(sql, t, item.id, drivers)
+    expect(mock.published).toHaveLength(1)
+    expect(mock.published[0].input.body).toBe("LEGENDA IG\n\n#pme #crm")
+  })
+
+  it("análises: insertAnalysis persiste e listAnalyses lê (payload jsonb intacto)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const item = await newItem(t, "analise")
+    await withTenant(sql, t, (tx) =>
+      insertAnalysis(tx, { itemId: item.id, type: "seo", payload: { score: 82, notes: ["ok"] }, model: "m" }),
+    )
+    const rows = await withTenant(sql, t, (tx) => listAnalyses(tx, item.id))
+    expect(rows).toHaveLength(1)
+    expect((rows[0].payload as { score: number }).score).toBe(82)
+    expect(rows[0].type).toBe("seo")
   })
 
   it("provisioning: SubscriptionActivated{motor} aplica migrations de tenant", async () => {

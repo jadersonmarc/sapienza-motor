@@ -30,7 +30,11 @@ pnpm build                # next build
   (emitUsageRecorded + consumer), `authclient` (verifyProductToken jose), `crypto` (AES-256-GCM).
 - `db/migrations/tenant/*.up.sql` — tabelas do Motor no schema do tenant.
 - `lib/content/` — `state-machine`, `store` (SQL cru sob withTenant), `transition`
-  (billing na publicação), `regenerate` (limite).
+  (billing na publicação), `regenerate` (limite), `social-text` (parseHashtags puro).
+- `lib/ai/` — `client` (callStructured, Claude json_schema), `generate` (draft rico + seam/fallback),
+  `social` (legendas IG/LinkedIn + fallback), `analyzers` (quality/seo/emotional/thematic, exigem IA).
+  Endpoints: `content/[id]/social` (gera rascunho social) e `content/[id]/analyze` (roda/lista análises).
+  Publish prefere a legenda social gerada ao markdown cru (IG/LinkedIn).
 - `lib/channels/` — interface `Channel` + impls (blog/instagram/linkedin) + `MockChannel` + registry (tier gate).
 - `lib/brand/` — renderer de imagem on-brand (`next/og`/Satori, extraído de spa-sapienza):
   `tokens` (fonte única sRGB), `formats`, `fonts` (TTFs em `assets/fonts`), `render`,
