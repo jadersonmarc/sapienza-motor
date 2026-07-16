@@ -60,19 +60,37 @@ export async function publishItem(
   imageUrl?: string,
 ): Promise<{ platform: Platform; url: string }[]> {
   // Conteúdo atual + slug + canais, numa leitura tenant-scoped.
-  const { slug, title, body, channels } = await withTenant(sql, tenantId, async (tx) => {
+  const { slug, title, body, alreadyPublished, channels } = await withTenant(sql, tenantId, async (tx) => {
     const [item] = (await tx`
-      SELECT ci.slug, cr.title, cr.body_markdown
+      SELECT ci.slug, ci.published_at, cr.title, cr.body_markdown
         FROM content_items ci
         JOIN content_revisions cr ON cr.id = ci.current_revision_id
        WHERE ci.id = ${itemId}
-    `) as unknown as { slug: string; title: string; body_markdown: string }[]
+    `) as unknown as { slug: string; published_at: string | null; title: string; body_markdown: string }[]
     if (!item) throw new Error("peça ou revisão não encontrada")
     const channels = (await tx`
       SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true
     `) as unknown as { platform: Platform; credentials_enc: string | null }[]
-    return { slug: item.slug, title: item.title, body: item.body_markdown, channels }
+    return {
+      slug: item.slug,
+      title: item.title,
+      body: item.body_markdown,
+      alreadyPublished: item.published_at != null,
+      channels,
+    }
   })
+
+  // Idempotente: uma peça já publicada não re-posta nos canais nem duplica
+  // social_drafts (o billing já tem guard em published_at). Retorna o que foi enviado.
+  if (alreadyPublished) {
+    return withTenant(sql, tenantId, async (tx) => {
+      const rows = (await tx`
+        SELECT platform, post_url FROM social_drafts
+         WHERE content_item_id = ${itemId} AND status = 'sent' AND post_url IS NOT NULL
+      `) as unknown as { platform: Platform; post_url: string }[]
+      return rows.map((r) => ({ platform: r.platform, url: r.post_url }))
+    })
+  }
 
   const results: { platform: Platform; url: string }[] = []
   for (const ch of channels) {

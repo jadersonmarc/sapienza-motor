@@ -85,6 +85,21 @@ maybe("motor data plane", () => {
     expect(await usage(sql, t, "peca")).toBe(1)
   })
 
+  it("publishItem: republicar é idempotente (não duplica social_drafts nem refatura)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const item = await newItem(t, "pub-idem")
+    await connectChannel(sql, t, "blog")
+    const mock = new MockChannel("blog")
+    const drivers = { blog: mock, instagram: mock, linkedin: mock } as unknown as Drivers
+    await publishItem(sql, t, item.id, drivers)
+    const second = await publishItem(sql, t, item.id, drivers)
+    expect(second).toHaveLength(1) // retorna o draft já enviado
+    expect(mock.published).toHaveLength(1) // não re-postou
+    const drafts = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM social_drafts WHERE content_item_id=${item.id}`)) as unknown as { n: number }[]
+    expect(drafts[0].n).toBe(1)
+    expect(await usage(sql, t, "peca")).toBe(1)
+  })
+
   it("provisioning: SubscriptionActivated{motor} aplica migrations de tenant", async () => {
     const tid = randomUUID()
     await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS "${schemaName(tid)}"`)
