@@ -2,10 +2,20 @@ import { authed, isResponse, json } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
-import { getItemWithRevision, upsertSocialDraft } from "@/lib/content/store"
-import { generateSocial, isSocialPlatform } from "@/lib/ai/social"
+import { getItemWithRevision, upsertSocialDraft, listSocialDrafts } from "@/lib/content/store"
+import { generateSocial, isSocialPlatform, SOCIAL_PLATFORMS } from "@/lib/ai/social"
 
 export const runtime = "nodejs"
+
+// GET /api/v1/content/:id/social — rascunhos sociais salvos + plataformas disponíveis.
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+  const a = await authed(req)
+  if (isResponse(a)) return a
+  const { id } = await ctx.params
+  const sql = getDb()
+  const drafts = await withTenant(sql, a.tenantId, (tx) => listSocialDrafts(tx, id))
+  return json(200, { drafts, platforms: SOCIAL_PLATFORMS })
+}
 
 // POST /api/v1/content/:id/social — gera a legenda social (IG/LinkedIn) da revisão
 // atual e salva como rascunho editável (social_drafts, status draft). Sem IA cai

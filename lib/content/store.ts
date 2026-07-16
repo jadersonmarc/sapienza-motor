@@ -101,6 +101,15 @@ export async function socialDraftFor(tx: Tx, itemId: string, platform: string): 
   return rows[0] ?? null
 }
 
+/** Rascunhos sociais ativos (draft|approved), 1 por plataforma (o mais recente). */
+export async function listSocialDrafts(tx: Tx, itemId: string): Promise<SocialDraft[]> {
+  return (await tx`
+    SELECT DISTINCT ON (platform) platform, body, hashtags, status FROM social_drafts
+     WHERE content_item_id = ${itemId} AND status IN ('draft','approved')
+     ORDER BY platform, created_at DESC
+  `) as unknown as SocialDraft[]
+}
+
 export async function insertAnalysis(
   tx: Tx,
   input: { itemId: string; revisionId?: string | null; type: string; payload: unknown; model?: string | null },
