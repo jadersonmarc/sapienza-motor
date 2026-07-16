@@ -49,6 +49,10 @@ export async function contentTransition(
         const period = new Date().toISOString().slice(0, 7)
         await emitUsageRecorded(tx, { tenantId, metric: "peca", count: 1, period })
       }
+    } else if (to === "draft") {
+      // Voltar a rascunho (ex.: rejeição) reseta o agendamento e a janela de aprovação,
+      // tirando a peça do caminho de auto-publicação dos crons.
+      await tx`UPDATE content_items SET status='draft', review_deadline_at=NULL, scheduled_at=NULL, updated_at=now() WHERE id=${itemId}`
     } else {
       await tx`UPDATE content_items SET status=${to}, updated_at=now() WHERE id=${itemId}`
     }

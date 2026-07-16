@@ -16,13 +16,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const sql = getDb()
   if (!(await canOperate(sql, a.tenantId))) return json(403, { error: "subscription not active" })
 
-  const body = (await req.json().catch(() => ({}))) as { to?: string; scheduledAt?: string }
+  const body = (await req.json().catch(() => ({}))) as { to?: string; scheduledAt?: string; note?: string }
   const to = body.to as ContentStatus | undefined
   if (!to) return json(400, { error: "to required" })
   try {
     await contentTransition(sql, a.tenantId, id, to, {
       actorId: a.userId,
       scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : undefined,
+      note: body.note?.trim() || undefined,
     })
   } catch (e) {
     if (e instanceof TransitionError) return json(409, { error: e.message })

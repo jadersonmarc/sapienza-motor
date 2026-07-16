@@ -114,6 +114,18 @@ maybe("motor data plane", () => {
     expect(mock.published[0].input.body).toBe("LEGENDA IG\n\n#pme #crm")
   })
 
+  it("rejeição: in_review → draft grava a nota (audit) e limpa a janela de aprovação", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const item = await newItem(t, "rejeitar")
+    await contentTransition(sql, t, item.id, "in_review")
+    await contentTransition(sql, t, item.id, "draft", { note: "faltou o CTA" })
+    const [row] = (await withTenant(sql, t, (tx) => tx`SELECT status, review_deadline_at FROM content_items WHERE id=${item.id}`)) as unknown as { status: string; review_deadline_at: string | null }[]
+    expect(row.status).toBe("draft")
+    expect(row.review_deadline_at).toBeNull() // saiu do caminho de auto-publicação
+    const audits = (await withTenant(sql, t, (tx) => tx`SELECT note FROM audit_log WHERE content_item_id=${item.id} AND to_status='draft'`)) as unknown as { note: string | null }[]
+    expect(audits.some((a) => a.note === "faltou o CTA")).toBe(true)
+  })
+
   it("cron: listItemTitles devolve títulos para a renovação de tema, escopado ao tenant", async () => {
     const a = await provisionTenant(sql, "pro")
     const b = await provisionTenant(sql, "pro")
