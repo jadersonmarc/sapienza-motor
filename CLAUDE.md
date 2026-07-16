@@ -32,7 +32,12 @@ pnpm build                # next build
 - `lib/content/` — `state-machine`, `store` (SQL cru sob withTenant), `transition`
   (billing na publicação), `regenerate` (limite).
 - `lib/channels/` — interface `Channel` + impls (blog/instagram/linkedin) + `MockChannel` + registry (tier gate).
-- `lib/provisioning.ts` — consumer do outbox (SubscriptionActivated{motor} → migrations).
+- `lib/provisioning.ts` — consumer do outbox (SubscriptionActivated{motor} → migrations);
+  `catchUp` roda no boot (`pnpm provision`, `scripts/provision.ts`).
+- `app/api/v1/*` — API do produto (JWT do core via `lib/api/http.ts`): `content`
+  (list/get/create), `content/[id]/{transition,regenerate,publish}`, `channels`, `setup`.
+- `app/api/cron/*` — route handlers protegidos por `x-webhook-secret` (`lib/platform/webhook.ts`):
+  `publish-scheduled`, `close-approval-window` (janela 48h), `provision` (drena o outbox).
 - `lib/testutil.ts` — sobe o subconjunto do control plane + trigger de uso + provisiona tenants.
 
 ## Convenções
