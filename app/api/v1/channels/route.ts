@@ -1,4 +1,4 @@
-import { authed, isResponse, json } from "@/lib/api/http"
+import { authed, isResponse, json, requireRole } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { canOperate, channelLimit } from "@/lib/platform/gating"
 import { enabledChannels, connectChannel, ChannelLimitError } from "@/lib/channels/registry"
@@ -22,9 +22,12 @@ export async function GET(req: Request): Promise<Response> {
 }
 
 // POST /api/v1/channels — conecta/atualiza um canal (gate por tier).
+// Grava credenciais do cliente (cifradas): exige owner/admin, não qualquer membro.
 export async function POST(req: Request): Promise<Response> {
   const a = await authed(req)
   if (isResponse(a)) return a
+  const denied = requireRole(a, ["owner", "admin"])
+  if (denied) return denied
   const sql = getDb()
   if (!(await canOperate(sql, a.tenantId))) return json(403, { error: "subscription not active" })
 

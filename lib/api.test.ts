@@ -60,6 +60,51 @@ maybe("motor API", () => {
     expect((await GET(req("GET", "/api/v1/content", wrong))).status).toBe(403)
   })
 
+  // Antes, `if (claims.produto && claims.produto !== PRODUTO)` deixava passar um
+  // token que não trouxesse a claim — sem escopo nenhum.
+  it("rejeita token sem a claim produto (escopo obrigatório)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const { GET } = await import("@/app/api/v1/content/route")
+    const semEscopo = await token(t, { produto: "" })
+    expect((await GET(req("GET", "/api/v1/content", semEscopo))).status).toBe(403)
+  })
+
+  it("conectar canal exige owner/admin — member recebe 403", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const { POST } = await import("@/app/api/v1/channels/route")
+    const body = { platform: "blog" }
+
+    const member = await POST(req("POST", "/api/v1/channels", await token(t, { role: "member" }), body))
+    expect(member.status).toBe(403)
+
+    const admin = await POST(req("POST", "/api/v1/channels", await token(t, { role: "admin" }), body))
+    expect(admin.status).toBe(200)
+    const owner = await POST(req("POST", "/api/v1/channels", await token(t, { role: "owner" }), body))
+    expect(owner.status).toBe(200)
+  })
+
+  it("listar canais continua liberado para qualquer membro", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const { GET } = await import("@/app/api/v1/channels/route")
+    const res = await GET(req("GET", "/api/v1/channels", await token(t, { role: "member" })))
+    expect(res.status).toBe(200)
+  })
+
+  it("cota de geração: a criação além do plano responde 409", async () => {
+    const t = await provisionTenant(sql, "start") // incluso = 12
+    const tok = await token(t)
+    const { POST } = await import("@/app/api/v1/content/route")
+    for (let i = 0; i < 12; i++) {
+      const ok = await POST(req("POST", "/api/v1/content", tok, { prompt: `tema ${i}` }))
+      expect(ok.status).toBe(201)
+    }
+    const blocked = await POST(req("POST", "/api/v1/content", tok, { prompt: "mais um" }))
+    expect(blocked.status).toBe(409)
+    const data = (await blocked.json()) as { error: string }
+    expect(data.error).toMatch(/cota de geração/i)
+    expect(await usage(sql, t, "geracao")).toBe(12)
+  })
+
   it("lista somente conteúdo do próprio tenant (isolamento via JWT)", async () => {
     const a = await provisionTenant(sql, "pro")
     const b = await provisionTenant(sql, "pro")
