@@ -70,3 +70,84 @@ export class LinkedinChannel implements Channel {
     return { url: `https://www.linkedin.com/feed/update/${id}` }
   }
 }
+
+export class FacebookChannel implements Channel {
+  readonly platform: Platform = "facebook"
+  async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
+    if (!credentials) throw new Error("facebook: credenciais ausentes")
+    const { access_token, page_id } = JSON.parse(credentials) as {
+      access_token: string
+      page_id: string
+    }
+    const base = "https://graph.facebook.com/v21.0"
+    const message = `${input.title}\n\n${input.body}`
+    // Post com link (imagem) usa /photos; sem imagem, /feed.
+    const endpoint = input.imageUrl ? `${base}/${page_id}/photos` : `${base}/${page_id}/feed`
+    const body = input.imageUrl
+      ? { url: input.imageUrl, caption: message, access_token }
+      : { message, access_token }
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(`facebook ${input.imageUrl ? "photos" : "feed"}: ${res.status}`)
+    const { id, post_id } = (await res.json()) as { id: string; post_id?: string }
+    return { url: `https://www.facebook.com/${post_id ?? id}` }
+  }
+}
+
+export class TwitterChannel implements Channel {
+  readonly platform: Platform = "twitter"
+  async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
+    if (!credentials) throw new Error("twitter: credenciais ausentes")
+    const { access_token, username } = JSON.parse(credentials) as {
+      access_token: string
+      username?: string
+    }
+    // X API v2: cria um tweet (texto). Respeita o limite de 280 caracteres.
+    const text = input.body.slice(0, 280)
+    const res = await fetch("https://api.twitter.com/2/tweets", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    })
+    if (!res.ok) throw new Error(`twitter tweets: ${res.status}`)
+    const { data } = (await res.json()) as { data: { id: string } }
+    return { url: `https://x.com/${username ?? "i"}/status/${data.id}` }
+  }
+}
+
+export class ThreadsChannel implements Channel {
+  readonly platform: Platform = "threads"
+  async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
+    if (!credentials) throw new Error("threads: credenciais ausentes")
+    const { access_token, user_id } = JSON.parse(credentials) as {
+      access_token: string
+      user_id: string
+    }
+    const base = "https://graph.threads.net/v1.0"
+    // 1) cria o container (texto ou imagem)
+    const create = await fetch(`${base}/${user_id}/threads`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        media_type: input.imageUrl ? "IMAGE" : "TEXT",
+        text: input.body,
+        ...(input.imageUrl ? { image_url: input.imageUrl } : {}),
+        access_token,
+      }),
+    })
+    if (!create.ok) throw new Error(`threads create: ${create.status}`)
+    const { id: creationId } = (await create.json()) as { id: string }
+    // 2) publica o container
+    const pub = await fetch(`${base}/${user_id}/threads_publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ creation_id: creationId, access_token }),
+    })
+    if (!pub.ok) throw new Error(`threads publish: ${pub.status}`)
+    const { id } = (await pub.json()) as { id: string }
+    return { url: `https://www.threads.net/t/${id}` }
+  }
+}

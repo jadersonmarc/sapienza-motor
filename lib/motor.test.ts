@@ -73,6 +73,20 @@ maybe("motor data plane", () => {
     await expect(connectChannel(sql, t, "instagram")).rejects.toBeInstanceOf(ChannelLimitError)
   })
 
+  it("canais novos: facebook/twitter/threads conectam e publicam (dentro do tier)", async () => {
+    const t = await provisionTenant(sql, "scale") // 3 canais
+    const item = await newItem(t, "multi-canal")
+    await connectChannel(sql, t, "facebook")
+    await connectChannel(sql, t, "twitter")
+    await connectChannel(sql, t, "threads")
+    const mk = (p: "facebook" | "twitter" | "threads") => new MockChannel(p)
+    const fb = mk("facebook"), tw = mk("twitter"), th = mk("threads")
+    const drivers = { blog: fb, instagram: fb, linkedin: fb, facebook: fb, twitter: tw, threads: th } as unknown as Drivers
+    const res = await publishItem(sql, t, item.id, drivers)
+    expect(res.map((r) => r.platform).sort()).toEqual(["facebook", "threads", "twitter"])
+    expect(await usage(sql, t, "peca")).toBe(1) // uma peça, 3 canais = 1 unidade
+  })
+
   it("publishItem: publica no canal (mock) e fatura 1 peça", async () => {
     const t = await provisionTenant(sql, "pro")
     const item = await newItem(t, "pub")

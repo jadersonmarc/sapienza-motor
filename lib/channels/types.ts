@@ -2,9 +2,16 @@
 // pipeline é agnóstico de provedor; impls concretas (instagram/linkedin/blog) e
 // MockChannel (testes) implementam esta interface.
 
-export type Platform = "instagram" | "linkedin" | "blog"
+export type Platform = "instagram" | "linkedin" | "blog" | "facebook" | "twitter" | "threads"
 
-export const PLATFORMS: Platform[] = ["instagram", "linkedin", "blog"]
+export const PLATFORMS: Platform[] = [
+  "instagram",
+  "linkedin",
+  "blog",
+  "facebook",
+  "twitter",
+  "threads",
+]
 
 export type PublishInput = {
   slug: string

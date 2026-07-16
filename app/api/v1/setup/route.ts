@@ -8,9 +8,12 @@ export const runtime = "nodejs"
 
 // Credenciais pedidas por canal no onboarding (mockadas em teste).
 const REQUIRED_CREDENTIALS: Record<string, string[]> = {
-  instagram: ["INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_ACCOUNT_ID"],
-  linkedin: ["LINKEDIN_ACCESS_TOKEN", "LINKEDIN_AUTHOR_URN"],
+  instagram: ["access_token", "account_id"],
+  linkedin: ["access_token", "author_urn"],
   blog: [],
+  facebook: ["access_token", "page_id"],
+  twitter: ["access_token", "username"],
+  threads: ["access_token", "user_id"],
 }
 
 // GET /api/v1/setup — status de onboarding: assinatura, capacidade de canais e o que falta.

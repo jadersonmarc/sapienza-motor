@@ -36,7 +36,8 @@ pnpm build                # next build
   `social` (legendas IG/LinkedIn + fallback), `analyzers` (quality/seo/emotional/thematic, exigem IA).
   Endpoints: `content` (prompt), `content/brief` (brief), `content/[id]/social`, `content/[id]/analyze`.
   Publish prefere a legenda social gerada ao markdown cru (IG/LinkedIn).
-- `lib/channels/` — interface `Channel` + impls (blog/instagram/linkedin) + `MockChannel` + registry (tier gate).
+- `lib/channels/` — interface `Channel` + impls (blog/instagram/linkedin/facebook/twitter/threads) +
+  `MockChannel` + registry (tier gate). Credenciais por canal chegam decifradas (JSON) do `motor_channels`.
 - `lib/brand/` — renderer de imagem on-brand (`next/og`/Satori, extraído de spa-sapienza):
   `tokens` (fonte única sRGB), `formats`, `fonts` (TTFs em `assets/fonts`), `render`,
   `compose` (entrada→arquétipo), `templates/*` (capa/conceito/diagrama/carrossel/bastidores +

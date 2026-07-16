@@ -4,12 +4,26 @@ import { channelLimit } from "@/lib/platform/gating"
 import { encryptSecret, decryptSecret } from "@/lib/platform/crypto"
 import { contentTransition } from "@/lib/content/transition"
 import type { Channel, Platform } from "./types"
-import { BlogChannel, InstagramChannel, LinkedinChannel } from "./impls"
+import {
+  BlogChannel,
+  InstagramChannel,
+  LinkedinChannel,
+  FacebookChannel,
+  TwitterChannel,
+  ThreadsChannel,
+} from "./impls"
 
 export type Drivers = Record<Platform, Channel>
 
 export function defaultDrivers(): Drivers {
-  return { instagram: new InstagramChannel(), linkedin: new LinkedinChannel(), blog: new BlogChannel() }
+  return {
+    instagram: new InstagramChannel(),
+    linkedin: new LinkedinChannel(),
+    blog: new BlogChannel(),
+    facebook: new FacebookChannel(),
+    twitter: new TwitterChannel(),
+    threads: new ThreadsChannel(),
+  }
 }
 
 export class ChannelLimitError extends Error {}
