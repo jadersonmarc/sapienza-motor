@@ -33,21 +33,30 @@ export async function ensureSchema(sql: Sql, tenantId: string): Promise<void> {
 
 export type Migration = { name: string; body: string }
 
+// Tabela de rastreamento PRÓPRIA do Motor. Margot e Motor coabitam o mesmo
+// `tenant_<id>`, e o kit (Margot) já cria uma `schema_migrations` com estrutura
+// incompatível — `(version bigint PK, name, applied_at)`, inserindo `(version,
+// name)`. Se o Motor usasse `schema_migrations`, quem provisionasse primeiro
+// fixava a estrutura e o outro quebrava: com a tabela da Margot presente, o
+// `INSERT (name)` do Motor deixa `version` nulo → viola NOT NULL → o provision
+// morre em loop. Cada produto rastreia na sua tabela.
+const TRACKING_TABLE = "motor_schema_migrations"
+
 /** Aplica as migrations de tenant sob o search_path do tenant, rastreando
- *  schema_migrations por schema (forward-only, idempotente). */
+ *  motor_schema_migrations por schema (forward-only). */
 export async function applyTenantMigrations(sql: Sql, tenantId: string, migrations: Migration[]): Promise<void> {
   await ensureSchema(sql, tenantId)
   await withTenant(sql, tenantId, async (tx) => {
     await tx.unsafe(
-      `CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`,
+      `CREATE TABLE IF NOT EXISTS ${TRACKING_TABLE} (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`,
     )
   })
   for (const m of migrations) {
     await withTenant(sql, tenantId, async (tx) => {
-      const done = await tx`SELECT 1 FROM schema_migrations WHERE name = ${m.name}`
+      const done = await tx`SELECT 1 FROM ${tx(TRACKING_TABLE)} WHERE name = ${m.name}`
       if (done.length > 0) return
       await tx.unsafe(m.body)
-      await tx`INSERT INTO schema_migrations (name) VALUES (${m.name})`
+      await tx`INSERT INTO ${tx(TRACKING_TABLE)} (name) VALUES (${m.name})`
     })
   }
 }

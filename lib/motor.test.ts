@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { randomUUID } from "node:crypto"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
-import { withTenant, schemaName } from "@/lib/platform/tenancy"
+import { withTenant, schemaName, applyTenantMigrations } from "@/lib/platform/tenancy"
+import { tenantMigrations } from "@/lib/db/migrations"
 import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTitles } from "@/lib/content/store"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
@@ -48,6 +49,38 @@ maybe("motor data plane", () => {
 
   const newItem = (tenantId: string, slug: string) =>
     withTenant(sql, tenantId, (tx) => createItem(tx, { slug, title: "T", bodyMarkdown: "corpo" }))
+
+  // Regressão de produção: Margot e Motor coabitam o mesmo tenant_<id>. Quando a
+  // Margot provisiona primeiro, ela cria schema_migrations do kit (version bigint
+  // PK, insere version+name). O Motor usava a MESMA tabela e o INSERT (name) dele
+  // deixava version nulo → NOT NULL → provision em restart loop. Agora o Motor tem
+  // motor_schema_migrations própria. Sem o fix, applyTenantMigrations rejeita aqui.
+  it("provisiona onde a Margot já criou schema_migrations (tabelas de rastreio coexistem)", async () => {
+    const tid = randomUUID()
+    const schema = schemaName(tid)
+    await sql.unsafe(`CREATE SCHEMA "${schema}"`)
+    await sql.unsafe(`CREATE TABLE "${schema}".schema_migrations (
+      version bigint PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`)
+    await sql.unsafe(`INSERT INTO "${schema}".schema_migrations (version, name) VALUES (1, '0001_crm')`)
+
+    await expect(applyTenantMigrations(sql, tid, tenantMigrations())).resolves.toBeUndefined()
+
+    const [content] = (await sql.unsafe(
+      `SELECT EXISTS(SELECT 1 FROM information_schema.tables
+         WHERE table_schema='${schema}' AND table_name='content_items') AS ok`,
+    )) as unknown as { ok: boolean }[]
+    expect(content.ok).toBe(true) // Motor criou suas tabelas apesar da schema_migrations da Margot
+
+    const [tracked] = (await sql.unsafe(
+      `SELECT count(*)::int AS n FROM "${schema}".motor_schema_migrations`,
+    )) as unknown as { n: number }[]
+    expect(tracked.n).toBeGreaterThan(0) // registrou na tabela PRÓPRIA
+
+    const [margot] = (await sql.unsafe(
+      `SELECT count(*)::int AS n FROM "${schema}".schema_migrations WHERE name='0001_crm'`,
+    )) as unknown as { n: number }[]
+    expect(margot.n).toBe(1) // a tabela da Margot ficou intacta
+  })
 
   it("billing: publicar fatura 1 peça; republicar não duplica", async () => {
     const t = await provisionTenant(sql, "pro")
