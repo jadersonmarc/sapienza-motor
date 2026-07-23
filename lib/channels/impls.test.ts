@@ -15,25 +15,54 @@ const input = {
 afterEach(() => vi.restoreAllMocks())
 
 describe("WordpressChannel", () => {
-  it("posta via REST com Basic auth e converte o markdown em HTML", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ id: 42, link: "https://cliente.com/minha-peca" }), { status: 201 }),
-    )
+  // Roteia as 3 chamadas: baixar a imagem, subir mídia, criar o post.
+  function routedFetch(opts: { mediaOk?: boolean } = {}) {
+    const { mediaOk = true } = opts
+    return vi.fn(async (u: string) => {
+      if (u === "https://cdn/x.png")
+        return new Response("PNGBYTES", { status: 200, headers: { "content-type": "image/png" } })
+      if (u.endsWith("/wp-json/wp/v2/media"))
+        return mediaOk ? new Response(JSON.stringify({ id: 99 }), { status: 201 }) : new Response("", { status: 500 })
+      if (u.endsWith("/wp-json/wp/v2/posts"))
+        return new Response(JSON.stringify({ id: 42, link: "https://cliente.com/minha-peca" }), { status: 201 })
+      return new Response("", { status: 404 })
+    })
+  }
+
+  const creds = JSON.stringify({ site_url: "https://cliente.com/", username: "editor", app_password: "abcd 1234" })
+
+  it("sobe a capa como imagem destacada e posta o HTML com Basic auth", async () => {
+    const fetchMock = routedFetch()
     vi.stubGlobal("fetch", fetchMock)
 
-    const creds = JSON.stringify({ site_url: "https://cliente.com/", username: "editor", app_password: "abcd 1234" })
     const { url } = await new WordpressChannel().publish(input, creds)
-
     expect(url).toBe("https://cliente.com/minha-peca")
-    const [calledUrl, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect(calledUrl).toBe("https://cliente.com/wp-json/wp/v2/posts") // sem barra dupla
-    const headers = init.headers as Record<string, string>
+
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][]
+    // mídia enviada com Content-Disposition (nome derivado da slug)
+    const media = calls.find(([u]) => u.endsWith("/wp-json/wp/v2/media"))!
+    expect((media[1].headers as Record<string, string>)["Content-Disposition"]).toContain('filename="minha-peca.png"')
+    // post com auth, HTML e featured_media da capa
+    const post = calls.find(([u]) => u.endsWith("/wp-json/wp/v2/posts"))!
+    const headers = post[1].headers as Record<string, string>
     expect(headers.Authorization).toBe(`Basic ${Buffer.from("editor:abcd 1234").toString("base64")}`)
-    const sent = JSON.parse(init.body as string)
+    const sent = JSON.parse(post[1].body as string)
     expect(sent.status).toBe("publish")
     expect(sent.slug).toBe("minha-peca")
+    expect(sent.featured_media).toBe(99)
     expect(sent.content).toContain("<strong>negrito</strong>") // markdown virou HTML
     expect(sent.content).toContain("<h1")
+  })
+
+  it("se a capa falhar, publica o texto mesmo assim (sem featured_media)", async () => {
+    const fetchMock = routedFetch({ mediaOk: false })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { url } = await new WordpressChannel().publish(input, creds)
+    expect(url).toBe("https://cliente.com/minha-peca")
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][]
+    const post = calls.find(([u]) => u.endsWith("/wp-json/wp/v2/posts"))!
+    expect(JSON.parse(post[1].body as string).featured_media).toBeUndefined()
   })
 
   it("sem credenciais, falha", async () => {

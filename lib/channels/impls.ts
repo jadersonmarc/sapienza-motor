@@ -15,7 +15,8 @@ export class BlogChannel implements Channel {
 }
 
 // Blog do site do cliente em WordPress: publica via REST API nativa com
-// Application Password (Basic Auth). O corpo (markdown) vira HTML.
+// Application Password (Basic Auth). O corpo (markdown) vira HTML e a capa
+// on-brand entra como imagem destacada (featured_media).
 export class WordpressChannel implements Channel {
   readonly platform: Platform = "wordpress"
   async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
@@ -27,15 +28,58 @@ export class WordpressChannel implements Channel {
     }
     const base = site_url.replace(/\/+$/, "")
     const auth = Buffer.from(`${username}:${app_password}`).toString("base64")
+
+    // Capa como imagem destacada (best-effort — não pode impedir o post do texto).
+    const featuredMedia = input.imageUrl
+      ? await uploadWordpressMedia(base, auth, input.imageUrl, input.slug)
+      : null
+
     const content = await marked.parse(input.body)
     const res = await fetch(`${base}/wp-json/wp/v2/posts`, {
       method: "POST",
       headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ title: input.title, content, slug: input.slug, status: "publish" }),
+      body: JSON.stringify({
+        title: input.title,
+        content,
+        slug: input.slug,
+        status: "publish",
+        ...(featuredMedia ? { featured_media: featuredMedia } : {}),
+      }),
     })
     if (!res.ok) throw new Error(`wordpress posts: ${res.status}`)
     const { link, id } = (await res.json()) as { link?: string; id: number }
     return { url: link ?? `${base}/?p=${id}` }
+  }
+}
+
+// Baixa a imagem (URL pública) e sobe na biblioteca do WP; devolve o id da mídia
+// ou null se qualquer passo falhar (a capa é opcional; o texto publica mesmo assim).
+async function uploadWordpressMedia(
+  base: string,
+  auth: string,
+  imageUrl: string,
+  slug: string,
+): Promise<number | null> {
+  try {
+    const img = await fetch(imageUrl)
+    if (!img.ok) return null
+    const contentType = img.headers.get("content-type") ?? "image/png"
+    const ext = contentType.split("/")[1]?.split(";")[0] || "png"
+    const bytes = await img.arrayBuffer()
+    const res = await fetch(`${base}/wp-json/wp/v2/media`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="${slug}.${ext}"`,
+      },
+      body: bytes,
+    })
+    if (!res.ok) return null
+    const { id } = (await res.json()) as { id: number }
+    return id ?? null
+  } catch {
+    return null
   }
 }
 
