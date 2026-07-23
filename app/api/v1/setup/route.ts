@@ -14,6 +14,8 @@ const REQUIRED_CREDENTIALS: Record<string, string[]> = {
   facebook: ["access_token", "page_id"],
   twitter: ["access_token", "username"],
   threads: ["access_token", "user_id"],
+  wordpress: ["site_url", "username", "app_password"],
+  webhook: ["url", "secret"],
 }
 
 // GET /api/v1/setup — status de onboarding: assinatura, capacidade de canais e o que falta.

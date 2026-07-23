@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto"
+import { marked } from "marked"
 import type { Channel, Platform, PublishInput } from "./types"
 
 // Impls concretas. Blog é canal interno (sem credencial). Instagram e LinkedIn
@@ -9,6 +11,57 @@ export class BlogChannel implements Channel {
   async publish(input: PublishInput): Promise<{ url: string }> {
     // Canal interno: "publicar" = o post já está no blog do tenant pela slug.
     return { url: `/blog/${input.slug}` }
+  }
+}
+
+// Blog do site do cliente em WordPress: publica via REST API nativa com
+// Application Password (Basic Auth). O corpo (markdown) vira HTML.
+export class WordpressChannel implements Channel {
+  readonly platform: Platform = "wordpress"
+  async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
+    if (!credentials) throw new Error("wordpress: credenciais ausentes")
+    const { site_url, username, app_password } = JSON.parse(credentials) as {
+      site_url: string
+      username: string
+      app_password: string
+    }
+    const base = site_url.replace(/\/+$/, "")
+    const auth = Buffer.from(`${username}:${app_password}`).toString("base64")
+    const content = await marked.parse(input.body)
+    const res = await fetch(`${base}/wp-json/wp/v2/posts`, {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: input.title, content, slug: input.slug, status: "publish" }),
+    })
+    if (!res.ok) throw new Error(`wordpress posts: ${res.status}`)
+    const { link, id } = (await res.json()) as { link?: string; id: number }
+    return { url: link ?? `${base}/?p=${id}` }
+  }
+}
+
+// Blog de site sob medida / CMS headless: entrega a peça por webhook, assinada
+// com HMAC-SHA256 (o segredo compartilhado) para o site confirmar a origem.
+export class WebhookChannel implements Channel {
+  readonly platform: Platform = "webhook"
+  async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
+    if (!credentials) throw new Error("webhook: credenciais ausentes")
+    const { url, secret } = JSON.parse(credentials) as { url: string; secret: string }
+    const payload = JSON.stringify({
+      slug: input.slug,
+      title: input.title,
+      body_markdown: input.body,
+      image_url: input.imageUrl ?? null,
+      published_at: new Date().toISOString(),
+    })
+    const signature = createHmac("sha256", secret).update(payload).digest("hex")
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Sapienza-Signature": `sha256=${signature}` },
+      body: payload,
+    })
+    if (!res.ok) throw new Error(`webhook: ${res.status}`)
+    const data = (await res.json().catch(() => ({}))) as { url?: string }
+    return { url: data.url ?? url }
   }
 }
 

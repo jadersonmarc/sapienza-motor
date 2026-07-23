@@ -12,6 +12,8 @@ import {
   FacebookChannel,
   TwitterChannel,
   ThreadsChannel,
+  WordpressChannel,
+  WebhookChannel,
 } from "./impls"
 
 export type Drivers = Record<Platform, Channel>
@@ -24,6 +26,8 @@ export function defaultDrivers(): Drivers {
     facebook: new FacebookChannel(),
     twitter: new TwitterChannel(),
     threads: new ThreadsChannel(),
+    wordpress: new WordpressChannel(),
+    webhook: new WebhookChannel(),
   }
 }
 
