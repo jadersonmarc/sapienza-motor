@@ -1,7 +1,7 @@
 import { authed, isResponse, json } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
-import { getItem } from "@/lib/content/store"
+import { getItem, addRevision } from "@/lib/content/store"
 
 export const runtime = "nodejs"
 
@@ -21,4 +21,34 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   })
   if (!item) return json(404, { error: "not found" })
   return json(200, item)
+}
+
+// PUT /api/v1/content/:id — edição manual: cria uma nova revisão (não-IA) com o
+// título/corpo editados e a torna a revisão atual da peça.
+export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+  const a = await authed(req)
+  if (isResponse(a)) return a
+  const { id } = await ctx.params
+  const body = (await req.json().catch(() => null)) as
+    | { title?: string; bodyMarkdown?: string; excerpt?: string }
+    | null
+  const title = body?.title?.trim()
+  const bodyMarkdown = body?.bodyMarkdown?.trim()
+  if (!title || !bodyMarkdown) {
+    return json(400, { error: "title e bodyMarkdown são obrigatórios" })
+  }
+  const sql = getDb()
+  const revId = await withTenant(sql, a.tenantId, async (tx) => {
+    const it = await getItem(tx, id)
+    if (!it) return null
+    return addRevision(tx, id, {
+      title,
+      bodyMarkdown,
+      excerpt: body?.excerpt?.trim() || undefined,
+      ai: false,
+      authorId: a.userId,
+    })
+  })
+  if (!revId) return json(404, { error: "not found" })
+  return json(200, { revision_id: revId })
 }

@@ -116,6 +116,31 @@ maybe("motor API", () => {
     expect(data.items.find((i) => i.slug === "do-a")).toBeUndefined()
   })
 
+  it("PUT /content/:id edita → nova revisão atual", async () => {
+    const t = await provisionTenant(sql)
+    const item = await withTenant(sql, t, (tx) =>
+      createItem(tx, { slug: "edita-me", title: "Antigo", bodyMarkdown: "corpo antigo" }),
+    )
+    const tok = await token(t)
+    const { PUT, GET } = await import("@/app/api/v1/content/[id]/route")
+    const params = { params: Promise.resolve({ id: item.id }) }
+
+    const res = await PUT(
+      req("PUT", `/api/v1/content/${item.id}`, tok, { title: "Novo título", bodyMarkdown: "corpo novo" }),
+      params,
+    )
+    expect(res.status).toBe(200)
+
+    const got = await GET(req("GET", `/api/v1/content/${item.id}`, tok), params)
+    const body = (await got.json()) as { revision: { title: string; body_markdown: string } }
+    expect(body.revision.title).toBe("Novo título")
+    expect(body.revision.body_markdown).toBe("corpo novo")
+
+    // sem título → 400
+    const bad = await PUT(req("PUT", `/api/v1/content/${item.id}`, tok, { title: "", bodyMarkdown: "x" }), params)
+    expect(bad.status).toBe(400)
+  })
+
   it("cria peça, transiciona para published e fatura 1 peça", async () => {
     const t = await provisionTenant(sql, "pro")
     const tok = await token(t)
