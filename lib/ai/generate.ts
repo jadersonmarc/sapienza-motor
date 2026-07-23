@@ -29,8 +29,8 @@ const SCHEMA = {
 } as const
 
 const SYSTEM =
-  "Você é redator(a) da Sapienza Labs, um estúdio de software sob medida para PMEs da " +
-  "Baixada Fluminense. Escreva em pt-BR correto e natural, com acentuação adequada. " +
+  "Você é redator(a) da Sapienza Labs, startup de inteligência artificial. Escreva em pt-BR " +
+  "correto e natural, com acentuação adequada. " +
   "Conteúdo original, útil e específico — sem clichês de IA. Não invente dados ou clientes."
 
 // Renovação de tema (cron editorial): evita repetir o que já existe e semeia
@@ -52,7 +52,7 @@ export function themeGuidance(ctx?: DraftThemeContext): string {
 }
 
 export async function generateDraft(prompt: string, ctx?: DraftThemeContext): Promise<Draft> {
-  const theme = prompt.trim() || "Conteúdo para PMEs da Baixada Fluminense"
+  const theme = prompt.trim() || "Conteúdo sobre tecnologia e inteligência artificial aplicada a negócios"
 
   if (!isAiConfigured()) {
     return {

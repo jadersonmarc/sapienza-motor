@@ -50,18 +50,18 @@ function block(i: SocialInput): string {
 }
 
 const BASE =
-  "Você cuida das redes da Sapienza Labs (software sob medida para PMEs da Baixada " +
-  "Fluminense). Escreva em pt-BR, natural e específico. Inclua um CTA para o link/WhatsApp. " +
-  "Retorne hashtags sem o caractere #."
+  "Você cuida das redes da Sapienza Labs, startup de inteligência artificial que constrói " +
+  "produtos de software que operam online. Escreva em pt-BR, natural e específico. Inclua um " +
+  "CTA para o link/WhatsApp. Retorne hashtags sem o caractere #."
 
 const generators: Record<SocialPlatform, SocialGenerator> = {
   instagram: {
     platform: "instagram",
     label: "Instagram",
-    system: `${BASE} Tom acessível e caloroso; emojis com moderação; quebras de linha curtas.`,
+    system: `${BASE} Tom acessível e caloroso, com quebras de linha curtas. Praticamente sem emojis: no máximo 1 na legenda inteira, e só se realmente agregar sentido — nunca como marcador de lista, bullet ou no início de linha, e nunca vários seguidos. Prefira zero.`,
     buildUser: (i) =>
       `Crie uma legenda de Instagram a partir do artigo. Gancho forte na 1ª linha, ` +
-      `corpo escaneável e CTA. 8–12 hashtags relevantes (mix de alcance e nicho local).\n\n${block(i)}`,
+      `corpo escaneável e CTA. 8–12 hashtags relevantes (mix de alcance e nicho).\n\n${block(i)}`,
     schema: SCHEMA,
   },
   linkedin: {

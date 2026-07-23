@@ -38,7 +38,7 @@ const SCHEMA = {
 } as const
 
 const SYSTEM =
-  "Você é redator(a) da Sapienza Labs (pt-BR, PMEs da Baixada Fluminense). Conteúdo " +
+  "Você é redator(a) da Sapienza Labs (pt-BR), startup de inteligência artificial. Conteúdo " +
   "original, útil e específico — sem clichês de IA. Não invente dados ou clientes."
 
 // Monta o prompt do usuário a partir do brief (parte pura, testável).
