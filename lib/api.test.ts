@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { SignJWT } from "jose"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
 import { withTenant } from "@/lib/platform/tenancy"
-import { createItem } from "@/lib/content/store"
+import { createItem, insertProposedRevision } from "@/lib/content/store"
 import type { Sql } from "@/lib/db"
 
 // Testa a camada de API (route handlers) end-to-end: JWT do core → autorização →
@@ -139,6 +139,42 @@ maybe("motor API", () => {
     // sem título → 400
     const bad = await PUT(req("PUT", `/api/v1/content/${item.id}`, tok, { title: "", bodyMarkdown: "x" }), params)
     expect(bad.status).toBe(400)
+  })
+
+  it("propostas de IA: lista → aceita (vira current) → esvazia", async () => {
+    const t = await provisionTenant(sql)
+    const item = await withTenant(sql, t, (tx) =>
+      createItem(tx, { slug: "com-proposta", title: "Original", bodyMarkdown: "corpo original" }),
+    )
+    // Simula o apply-recommendation inserindo a proposta direto no store (sem IA).
+    const propId = await withTenant(sql, t, (tx) =>
+      insertProposedRevision(tx, item.id, { title: "Melhorado", bodyMarkdown: "corpo melhorado" }, { recommendation: "melhore o gancho" }),
+    )
+    const tok = await token(t)
+    const idParams = { params: Promise.resolve({ id: item.id }) }
+    const pidParams = { params: Promise.resolve({ id: item.id, pid: propId }) }
+
+    const { GET: listProps } = await import("@/app/api/v1/content/[id]/proposals/route")
+    const { POST: accept, DELETE: discard } = await import("@/app/api/v1/content/[id]/proposals/[pid]/route")
+    const { GET: getContent } = await import("@/app/api/v1/content/[id]/route")
+
+    // Lista → 1 proposta.
+    let res = await listProps(req("GET", `/api/v1/content/${item.id}/proposals`, tok), idParams)
+    expect(((await res.json()) as { proposals: unknown[] }).proposals.length).toBe(1)
+
+    // Aceita → a peça passa a ter o título proposto.
+    res = await accept(req("POST", `/api/v1/content/${item.id}/proposals/${propId}`, tok), pidParams)
+    expect(res.status).toBe(200)
+    const detail = (await (await getContent(req("GET", `/api/v1/content/${item.id}`, tok), idParams)).json()) as {
+      revision: { title: string }
+    }
+    expect(detail.revision.title).toBe("Melhorado")
+
+    // Não há mais propostas; e aceitar/descartar de novo → 404.
+    res = await listProps(req("GET", `/api/v1/content/${item.id}/proposals`, tok), idParams)
+    expect(((await res.json()) as { proposals: unknown[] }).proposals.length).toBe(0)
+    res = await discard(req("DELETE", `/api/v1/content/${item.id}/proposals/${propId}`, tok), pidParams)
+    expect(res.status).toBe(404)
   })
 
   it("cria peça, transiciona para published e fatura 1 peça", async () => {

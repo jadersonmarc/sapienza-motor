@@ -155,6 +155,63 @@ export async function addRevision(
   return rev.id
 }
 
+export type ProposedFrom = { type?: string; recommendation: string }
+
+export type ProposedRevision = {
+  id: string
+  title: string
+  body_markdown: string
+  excerpt: string | null
+  proposed_from: ProposedFrom | null
+  created_at: string
+}
+
+// Insere uma revisão PROPOSTA pela IA: não vira a revisão atual (is_proposed=true).
+export async function insertProposedRevision(
+  tx: Tx,
+  itemId: string,
+  input: { title: string; bodyMarkdown: string; excerpt?: string },
+  proposedFrom: ProposedFrom,
+): Promise<string> {
+  const [rev] = (await tx`
+    INSERT INTO content_revisions
+      (content_item_id, title, body_markdown, excerpt, ai_generated, is_proposed, proposed_from)
+    VALUES (${itemId}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, true, true, ${tx.json(proposedFrom)})
+    RETURNING id
+  `) as unknown as { id: string }[]
+  return rev.id
+}
+
+export async function listProposedRevisions(tx: Tx, itemId: string): Promise<ProposedRevision[]> {
+  return (await tx`
+    SELECT id, title, body_markdown, excerpt, proposed_from, created_at
+      FROM content_revisions
+     WHERE content_item_id = ${itemId} AND is_proposed = true
+     ORDER BY created_at DESC
+  `) as unknown as ProposedRevision[]
+}
+
+// Aceitar: a proposta deixa de ser proposta e passa a ser a revisão atual da peça.
+export async function acceptProposal(tx: Tx, itemId: string, proposalId: string): Promise<boolean> {
+  const rows = (await tx`
+    UPDATE content_revisions SET is_proposed = false
+     WHERE id = ${proposalId} AND content_item_id = ${itemId} AND is_proposed = true
+     RETURNING id
+  `) as unknown as { id: string }[]
+  if (rows.length === 0) return false
+  await tx`UPDATE content_items SET current_revision_id = ${proposalId}, updated_at = now() WHERE id = ${itemId}`
+  return true
+}
+
+export async function discardProposal(tx: Tx, itemId: string, proposalId: string): Promise<boolean> {
+  const rows = (await tx`
+    DELETE FROM content_revisions
+     WHERE id = ${proposalId} AND content_item_id = ${itemId} AND is_proposed = true
+     RETURNING id
+  `) as unknown as { id: string }[]
+  return rows.length > 0
+}
+
 export async function insertAudit(
   tx: Tx,
   a: { itemId: string; actorId?: string | null; from: string | null; to: string; note?: string | null },
