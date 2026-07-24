@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { createHmac } from "node:crypto"
-import { WordpressChannel, WebhookChannel } from "./impls"
+import { WordpressChannel, WebhookChannel, LinkedinChannel } from "./impls"
 
 // Canais WordPress e Webhook (blog do site do cliente). Mockam o fetch — não
 // tocam rede. Verificam auth/HTML (WordPress) e a assinatura HMAC (Webhook).
@@ -67,6 +67,43 @@ describe("WordpressChannel", () => {
 
   it("sem credenciais, falha", async () => {
     await expect(new WordpressChannel().publish(input, null)).rejects.toThrow(/credenciais/)
+  })
+})
+
+describe("LinkedinChannel", () => {
+  it("aceita token cru, resolve o autor via userinfo e posta na Posts API atual", async () => {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u === "https://api.linkedin.com/v2/userinfo")
+        return new Response(JSON.stringify({ sub: "abc123" }), { status: 200 })
+      if (u === "https://api.linkedin.com/rest/posts")
+        return new Response("", { status: 201, headers: { "x-restli-id": "urn:li:share:999" } })
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    // Token CRU (não JSON) — o usuário costuma colar só o token.
+    const { url } = await new LinkedinChannel().publish(input, "AQV-token-cru")
+    expect(url).toContain("urn:li:share:999")
+
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][]
+    const post = calls.find(([u]) => u === "https://api.linkedin.com/rest/posts")!
+    const headers = post[1].headers as Record<string, string>
+    expect(headers["LinkedIn-Version"]).toBeTruthy()
+    expect(headers["X-Restli-Protocol-Version"]).toBe("2.0.0")
+    const sent = JSON.parse(post[1].body as string)
+    expect(sent.author).toBe("urn:li:person:abc123")
+    expect(sent.visibility).toBe("PUBLIC")
+    expect(sent.lifecycleState).toBe("PUBLISHED")
+  })
+
+  it("propaga o erro real (com corpo) da Posts API", async () => {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u === "https://api.linkedin.com/v2/userinfo")
+        return new Response(JSON.stringify({ sub: "x" }), { status: 200 })
+      return new Response('{"message":"invalid version"}', { status: 400 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(new LinkedinChannel().publish(input, "tok")).rejects.toThrow(/invalid version/)
   })
 })
 

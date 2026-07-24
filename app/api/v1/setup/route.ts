@@ -9,7 +9,7 @@ export const runtime = "nodejs"
 // Credenciais pedidas por canal no onboarding (mockadas em teste).
 const REQUIRED_CREDENTIALS: Record<string, string[]> = {
   instagram: ["access_token", "account_id"],
-  linkedin: ["access_token", "author_urn"],
+  linkedin: ["access_token"],
   blog: [],
   facebook: ["access_token", "page_id"],
   twitter: ["access_token", "username"],

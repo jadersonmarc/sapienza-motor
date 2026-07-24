@@ -139,32 +139,81 @@ export class InstagramChannel implements Channel {
   }
 }
 
+// Versão da LinkedIn Posts API (mensal, AAAAMM). Se a resposta reclamar de versão
+// inválida, é só bumpar aqui.
+const LINKEDIN_VERSION = "202505"
+
+// A Posts API usa "little text format": estes caracteres reservados precisam ser
+// escapados com \. Over-escapar é seguro (renderiza literal); under-escapar dá 422.
+function escapeLinkedinText(text: string): string {
+  return text.replace(/[\\|{}@[\]()<>#*_~]/g, (c) => "\\" + c)
+}
+
+// Resolve o urn:li:person do dono do token via OpenID userinfo (fallback /v2/me),
+// para o usuário só precisar colar o access_token. Requer escopo openid/profile.
+async function resolveLinkedinAuthor(accessToken: string): Promise<string> {
+  const ui = await fetch("https://api.linkedin.com/v2/userinfo", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (ui.ok) {
+    const { sub } = (await ui.json()) as { sub?: string }
+    if (sub) return `urn:li:person:${sub}`
+  }
+  const me = await fetch("https://api.linkedin.com/v2/me", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (me.ok) {
+    const { id } = (await me.json()) as { id?: string }
+    if (id) return `urn:li:person:${id}`
+  }
+  throw new Error("linkedin: não foi possível resolver o autor pelo token (precisa do escopo openid/profile)")
+}
+
 export class LinkedinChannel implements Channel {
   readonly platform: Platform = "linkedin"
   async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
     if (!credentials) throw new Error("linkedin: credenciais ausentes")
-    const { access_token, author_urn } = JSON.parse(credentials) as {
-      access_token: string
-      author_urn: string
+    // Aceita JSON {access_token, author_urn?} OU um token cru (o usuário costuma
+    // colar só o token).
+    let accessToken = ""
+    let authorUrn = ""
+    try {
+      const parsed = JSON.parse(credentials) as { access_token?: string; author_urn?: string }
+      accessToken = (parsed.access_token ?? "").trim()
+      authorUrn = (parsed.author_urn ?? "").trim()
+    } catch {
+      accessToken = credentials.trim()
     }
-    const res = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+    if (!accessToken) throw new Error("linkedin: access_token ausente")
+    if (!authorUrn) authorUrn = await resolveLinkedinAuthor(accessToken)
+
+    // API atual (Posts API); a /v2/ugcPosts é legada.
+    const res = await fetch("https://api.linkedin.com/rest/posts", {
       method: "POST",
-      headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
       body: JSON.stringify({
-        author: author_urn,
-        lifecycleState: "PUBLISHED",
-        specificContent: {
-          "com.linkedin.ugc.ShareContent": {
-            shareCommentary: { text: `${input.title}\n\n${input.body}` },
-            shareMediaCategory: "NONE",
-          },
+        author: authorUrn,
+        commentary: escapeLinkedinText(`${input.title}\n\n${input.body}`),
+        visibility: "PUBLIC",
+        distribution: {
+          feedDistribution: "MAIN_FEED",
+          targetEntities: [],
+          thirdPartyDistributionChannels: [],
         },
-        visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
+        lifecycleState: "PUBLISHED",
+        isReshareDisabledByAuthor: false,
       }),
     })
-    if (!res.ok) throw new Error(`linkedin ugcPosts: ${res.status}`)
-    const id = res.headers.get("x-restli-id") ?? ""
-    return { url: `https://www.linkedin.com/feed/update/${id}` }
+    if (!res.ok) {
+      throw new Error(`linkedin posts: ${res.status} ${await res.text().catch(() => "")}`)
+    }
+    const id = res.headers.get("x-restli-id") ?? res.headers.get("x-linkedin-id") ?? ""
+    return { url: id ? `https://www.linkedin.com/feed/update/${id}` : "https://www.linkedin.com/feed/" }
   }
 }
 
