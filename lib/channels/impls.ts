@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto"
 import { marked } from "marked"
 import type { Channel, Platform, PublishInput } from "./types"
+import { readImageBytes } from "@/lib/storage/s3"
 
 // Impls concretas. Blog é canal interno (sem credencial). Instagram e LinkedIn
 // falam com as APIs oficiais (adaptado de spa-sapienza/lib/social/*); só rodam em
@@ -173,7 +174,8 @@ async function resolveLinkedinAuthor(accessToken: string): Promise<string> {
 // Sobe a imagem (URL do R2) para o LinkedIn e devolve o URN da mídia, para
 // referenciar no post. Fluxo da Posts API atual: initializeUpload (/rest/images)
 // → PUT dos bytes → usa o `image` URN em content.media. Best-effort: qualquer
-// falha devolve null e o post sai só com texto (a imagem não vale bloquear a peça).
+// falha devolve null e o post sai só com texto (a imagem não vale bloquear a peça)
+// — mas LOGA o motivo real (`[linkedin-image]`) para dar visibilidade do erro.
 async function uploadLinkedinImage(accessToken: string, authorUrn: string, imageUrl: string): Promise<string | null> {
   try {
     const init = await fetch("https://api.linkedin.com/rest/images?action=initializeUpload", {
@@ -186,24 +188,36 @@ async function uploadLinkedinImage(accessToken: string, authorUrn: string, image
       },
       body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
     })
-    if (!init.ok) return null
+    if (!init.ok) {
+      console.error(`[linkedin-image] initializeUpload ${init.status}: ${await init.text().catch(() => "")}`)
+      return null
+    }
     const { value } = (await init.json()) as { value?: { uploadUrl?: string; image?: string } }
     const uploadUrl = value?.uploadUrl
     const imageUrn = value?.image
-    if (!uploadUrl || !imageUrn) return null
+    if (!uploadUrl || !imageUrn) {
+      console.error("[linkedin-image] initializeUpload sem uploadUrl/image na resposta")
+      return null
+    }
 
-    const img = await fetch(imageUrl)
-    if (!img.ok) return null
-    const bytes = new Uint8Array(await img.arrayBuffer())
+    const bytes = await readImageBytes(imageUrl)
+    if (!bytes) {
+      console.error(`[linkedin-image] não obteve os bytes da imagem (${imageUrl})`)
+      return null
+    }
 
     const up = await fetch(uploadUrl, {
       method: "PUT",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "image/png" },
       body: bytes,
     })
-    if (!up.ok) return null
+    if (!up.ok) {
+      console.error(`[linkedin-image] PUT do upload ${up.status}: ${await up.text().catch(() => "")}`)
+      return null
+    }
     return imageUrn
-  } catch {
+  } catch (e) {
+    console.error("[linkedin-image] exceção no upload:", e)
     return null
   }
 }

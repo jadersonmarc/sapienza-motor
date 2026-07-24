@@ -106,6 +106,28 @@ export async function uploadObject(
   return publicUrlForKey(tenantId, key)
 }
 
+/** Bytes de uma imagem por URL. Se for a NOSSA URL de proxy
+ *  (`MOTOR_PUBLIC_URL/api/media/<tenant>/<key>`), lê direto do storage — evita o
+ *  hairpin de o container buscar o próprio domínio público (causa comum de a
+ *  imagem "não ir"). URLs externas caem no fetch HTTP. null se falhar. */
+export async function readImageBytes(url: string): Promise<Uint8Array | null> {
+  const base = process.env.MOTOR_PUBLIC_URL
+  if (base) {
+    const prefix = `${base.replace(/\/$/, "")}/api/media/`
+    if (url.startsWith(prefix)) {
+      const rest = url.slice(prefix.length)
+      const slash = rest.indexOf("/")
+      if (slash > 0) {
+        const obj = await getObject(rest.slice(0, slash), rest.slice(slash + 1))
+        return obj?.body ?? null
+      }
+    }
+  }
+  const res = await fetch(url).catch(() => null)
+  if (!res || !res.ok) return null
+  return new Uint8Array(await res.arrayBuffer())
+}
+
 /** Busca os bytes de um objeto (alimenta o proxy público). null se não existir. */
 export async function getObject(
   tenantId: string,
