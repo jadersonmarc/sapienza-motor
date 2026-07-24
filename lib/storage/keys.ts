@@ -30,6 +30,12 @@ export function isR2Purpose(v: string): v is R2Purpose {
   return (R2_PURPOSES as readonly string[]).includes(v)
 }
 
+/** A chave pertence a uma pasta conhecida da biblioteca? Guard antes de
+ *  servir/excluir/mover — evita tocar chave arbitrária no bucket. */
+export function isKnownFolderKey(key: string): boolean {
+  return R2_PURPOSES.some((p) => key.startsWith(PREFIX[p] + "/"))
+}
+
 /** Prefixo da pasta de uma finalidade (sem barra final). Alimenta o list-by-prefix. */
 export function prefixFor(purpose: R2Purpose): string {
   return PREFIX[purpose]

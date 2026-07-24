@@ -122,6 +122,17 @@ maybe("motor API", () => {
     expect(res.status).toBe(403)
   })
 
+  it("upload/excluir mídia exige owner/admin — member recebe 403", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const { POST, DELETE } = await import("@/app/api/v1/media/route")
+    const memberTok = await token(t, { role: "member" })
+    // requireRole roda antes de checar storage — 403 mesmo sem S3 configurado.
+    const up = await POST(req("POST", "/api/v1/media", memberTok, {}))
+    expect(up.status).toBe(403)
+    const del = await DELETE(req("DELETE", "/api/v1/media?key=social/linkedin/x.png", memberTok))
+    expect(del.status).toBe(403)
+  })
+
   it("trocar conta: reconectar sobrescreve a credencial guardada", async () => {
     const t = await provisionTenant(sql, "pro")
     const { POST } = await import("@/app/api/v1/channels/route")

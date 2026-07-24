@@ -1,17 +1,11 @@
 import { getObject, isStorageConfigured } from "@/lib/storage/s3"
-import { R2_PURPOSES, prefixFor } from "@/lib/storage/keys"
+import { isKnownFolderKey } from "@/lib/storage/keys"
 
 export const runtime = "nodejs"
 
 // Proxy PÚBLICO de mídia: serve a imagem do bucket privado do tenant. Público de
 // propósito — IG/LinkedIn buscam a URL na publicação, sem credencial. Só serve
 // chaves dentro das pastas conhecidas da biblioteca (evita ler chave arbitrária).
-
-const ALLOWED_PREFIXES = R2_PURPOSES.map((p) => prefixFor(p) + "/")
-
-function isMediaKey(key: string): boolean {
-  return ALLOWED_PREFIXES.some((p) => key.startsWith(p))
-}
 
 export async function GET(
   _req: Request,
@@ -20,7 +14,7 @@ export async function GET(
   if (!isStorageConfigured()) return new Response("storage indisponível", { status: 503 })
   const { tenant, key } = await ctx.params
   const objectKey = (key ?? []).join("/")
-  if (!tenant || !objectKey || !isMediaKey(objectKey)) return new Response("não encontrado", { status: 404 })
+  if (!tenant || !objectKey || !isKnownFolderKey(objectKey)) return new Response("não encontrado", { status: 404 })
 
   const obj = await getObject(tenant, objectKey)
   if (!obj) return new Response("não encontrado", { status: 404 })
