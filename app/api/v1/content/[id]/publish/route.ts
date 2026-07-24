@@ -6,18 +6,33 @@ import { publishItem, PartialPublishError } from "@/lib/channels/registry"
 import { TransitionError } from "@/lib/content/state-machine"
 import { assertPublishAllowed, PublishCapError } from "@/lib/content/quota"
 import { generateAndStoreCover, isImageConfigured } from "@/lib/brand/social-image"
+import type { FormatId } from "@/lib/brand/formats"
 
 export const runtime = "nodejs"
+
+// Formato on-brand por canal da peça — a capa é "projetada para cada mídia" e o
+// r2KeyFor a grava na pasta certa (blog→articles, linkedin→social/linkedin, …).
+const COVER_FORMAT: Record<string, FormatId> = {
+  blog: "blog-og",
+  linkedin: "li-feed",
+  instagram: "ig-feed",
+}
 
 // Lê o essencial da peça (sob withTenant) p/ gerar a capa on-brand antes de publicar.
 async function coverInfo(sql: ReturnType<typeof getDb>, tenantId: string, id: string) {
   return withTenant(sql, tenantId, async (tx) => {
     const [row] = (await tx`
-      SELECT ci.slug, ci.pilar, ci.published_at, cr.title
+      SELECT ci.slug, ci.pilar, ci.format, ci.published_at, cr.title
         FROM content_items ci
         JOIN content_revisions cr ON cr.id = ci.current_revision_id
        WHERE ci.id = ${id}
-    `) as unknown as { slug: string; pilar: string | null; published_at: string | null; title: string }[]
+    `) as unknown as {
+      slug: string
+      pilar: string | null
+      format: string
+      published_at: string | null
+      title: string
+    }[]
     return row ?? null
   })
 }
@@ -49,9 +64,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!imageUrl && isImageConfigured()) {
     const info = await coverInfo(sql, a.tenantId, id)
     if (info && info.published_at == null) {
+      const formatId = COVER_FORMAT[info.format] ?? "ig-feed"
       imageUrl =
-        (await generateAndStoreCover(a.tenantId, { slug: info.slug, title: info.title, pilar: info.pilar })) ??
-        undefined
+        (await generateAndStoreCover(a.tenantId, {
+          slug: info.slug,
+          title: info.title,
+          pilar: info.pilar,
+          formatId,
+        })) ?? undefined
     }
   }
 
