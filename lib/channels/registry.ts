@@ -88,6 +88,20 @@ export async function connectChannel(
   })
 }
 
+/** Desconecta um canal: libera o slot do tier e zera a credencial guardada.
+ *  Desabilita (não deleta) — `channelLimit` só conta enabled=true, então o slot
+ *  volta; reconectar reusa a linha via ON CONFLICT. Zerar o token evita deixar
+ *  credencial antiga parada após a troca de conta. */
+export async function disconnectChannel(sql: Sql, tenantId: string, platform: Platform): Promise<void> {
+  await withTenant(sql, tenantId, async (tx) => {
+    await tx`
+      UPDATE motor_channels
+         SET enabled = false, credentials_enc = NULL, updated_at = now()
+       WHERE platform = ${platform}
+    `
+  })
+}
+
 /** Publica a peça nos canais habilitados e a transiciona para published (fatura 1 peça). */
 export async function publishItem(
   sql: Sql,

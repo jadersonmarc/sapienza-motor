@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import { SignJWT } from "jose"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
 import { withTenant } from "@/lib/platform/tenancy"
+import { decryptSecret } from "@/lib/platform/crypto"
 import { createItem, insertProposedRevision } from "@/lib/content/store"
 import type { Sql } from "@/lib/db"
 
@@ -88,6 +89,53 @@ maybe("motor API", () => {
     const { GET } = await import("@/app/api/v1/channels/route")
     const res = await GET(req("GET", "/api/v1/channels", await token(t, { role: "member" })))
     expect(res.status).toBe(200)
+  })
+
+  it("desconectar canal: some da lista e libera o slot do tier", async () => {
+    const t = await provisionTenant(sql, "start") // limite = 1 canal
+    const { POST, DELETE, GET } = await import("@/app/api/v1/channels/route")
+    const tok = await token(t, { role: "owner" })
+
+    expect((await POST(req("POST", "/api/v1/channels", tok, { platform: "blog" }))).status).toBe(200)
+    // slot cheio: um segundo canal é barrado (409)
+    expect(
+      (await POST(req("POST", "/api/v1/channels", tok, { platform: "linkedin", credentials: "tok" }))).status,
+    ).toBe(409)
+    // desconecta o blog → libera o slot
+    expect((await DELETE(req("DELETE", "/api/v1/channels", tok, { platform: "blog" }))).status).toBe(200)
+    expect(
+      (await POST(req("POST", "/api/v1/channels", tok, { platform: "linkedin", credentials: "tok" }))).status,
+    ).toBe(200)
+
+    const list = (await (await GET(req("GET", "/api/v1/channels", tok))).json()) as {
+      channels: { platform: string }[]
+    }
+    const platforms = list.channels.map((c) => c.platform)
+    expect(platforms).toContain("linkedin")
+    expect(platforms).not.toContain("blog")
+  })
+
+  it("desconectar exige owner/admin — member recebe 403", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const { DELETE } = await import("@/app/api/v1/channels/route")
+    const res = await DELETE(req("DELETE", "/api/v1/channels", await token(t, { role: "member" }), { platform: "blog" }))
+    expect(res.status).toBe(403)
+  })
+
+  it("trocar conta: reconectar sobrescreve a credencial guardada", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const { POST } = await import("@/app/api/v1/channels/route")
+    const tok = await token(t, { role: "owner" })
+    await POST(req("POST", "/api/v1/channels", tok, { platform: "linkedin", credentials: "token-A" }))
+    await POST(req("POST", "/api/v1/channels", tok, { platform: "linkedin", credentials: "token-B" }))
+
+    const enc = await withTenant(sql, t, async (tx) => {
+      const [row] = (await tx`SELECT credentials_enc FROM motor_channels WHERE platform = 'linkedin'`) as unknown as {
+        credentials_enc: string
+      }[]
+      return row.credentials_enc
+    })
+    expect(decryptSecret(enc)).toBe("token-B")
   })
 
   it("cota de geração: a criação além do plano responde 409", async () => {

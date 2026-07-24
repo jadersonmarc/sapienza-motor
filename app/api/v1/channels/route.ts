@@ -1,7 +1,7 @@
 import { authed, isResponse, json, requireRole } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { canOperate, channelLimit } from "@/lib/platform/gating"
-import { enabledChannels, connectChannel, ChannelLimitError } from "@/lib/channels/registry"
+import { enabledChannels, connectChannel, disconnectChannel, ChannelLimitError } from "@/lib/channels/registry"
 import { PLATFORMS, type Platform } from "@/lib/channels/types"
 
 export const runtime = "nodejs"
@@ -40,5 +40,22 @@ export async function POST(req: Request): Promise<Response> {
     if (e instanceof ChannelLimitError) return json(409, { error: e.message })
     throw e
   }
+  return json(200, { ok: true })
+}
+
+// DELETE /api/v1/channels — desconecta um canal (libera o slot do tier).
+// Mesma autorização do POST: só owner/admin mexe em credenciais.
+export async function DELETE(req: Request): Promise<Response> {
+  const a = await authed(req)
+  if (isResponse(a)) return a
+  const denied = requireRole(a, ["owner", "admin"])
+  if (denied) return denied
+  const sql = getDb()
+  if (!(await canOperate(sql, a.tenantId))) return json(403, { error: "subscription not active" })
+
+  const body = (await req.json().catch(() => ({}))) as { platform?: string }
+  const platform = body.platform as Platform | undefined
+  if (!platform || !PLATFORMS.includes(platform)) return json(400, { error: "invalid platform" })
+  await disconnectChannel(sql, a.tenantId, platform)
   return json(200, { ok: true })
 }
