@@ -22,7 +22,7 @@ const COVER_FORMAT: Record<string, FormatId> = {
 async function coverInfo(sql: ReturnType<typeof getDb>, tenantId: string, id: string) {
   return withTenant(sql, tenantId, async (tx) => {
     const [row] = (await tx`
-      SELECT ci.slug, ci.pilar, ci.format, ci.published_at, cr.title
+      SELECT ci.slug, ci.pilar, ci.format, ci.image_url, ci.published_at, cr.title
         FROM content_items ci
         JOIN content_revisions cr ON cr.id = ci.current_revision_id
        WHERE ci.id = ${id}
@@ -30,6 +30,7 @@ async function coverInfo(sql: ReturnType<typeof getDb>, tenantId: string, id: st
       slug: string
       pilar: string | null
       format: string
+      image_url: string | null
       published_at: string | null
       title: string
     }[]
@@ -59,19 +60,24 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const body = (await req.json().catch(() => ({}))) as { imageUrl?: string }
   let imageUrl = body.imageUrl
 
-  // Só gera a capa se o storage estiver configurado e a peça ainda não foi publicada
+  // Imagem: prioridade (1) a escolhida no editor (content_items.image_url), depois
+  // (2) gerar na hora. Só se storage configurado e a peça ainda não foi publicada
   // (republicar é idempotente — não re-renderiza nem re-posta).
   if (!imageUrl && isImageConfigured()) {
     const info = await coverInfo(sql, a.tenantId, id)
     if (info && info.published_at == null) {
-      const formatId = COVER_FORMAT[info.format] ?? "ig-feed"
-      imageUrl =
-        (await generateAndStoreCover(a.tenantId, {
-          slug: info.slug,
-          title: info.title,
-          pilar: info.pilar,
-          formatId,
-        })) ?? undefined
+      if (info.image_url) {
+        imageUrl = info.image_url
+      } else {
+        const formatId = COVER_FORMAT[info.format] ?? "ig-feed"
+        imageUrl =
+          (await generateAndStoreCover(a.tenantId, {
+            slug: info.slug,
+            title: info.title,
+            pilar: info.pilar,
+            formatId,
+          })) ?? undefined
+      }
     }
   }
 

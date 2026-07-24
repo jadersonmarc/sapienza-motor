@@ -172,6 +172,23 @@ maybe("motor data plane", () => {
     expect(rows[0].n).toBe(0)
   })
 
+  it("publica só nos canais do formato da peça (linkedin não espalha p/ instagram)", async () => {
+    const t = await provisionTenant(sql, "pro") // limite 2 canais
+    const item = await withTenant(sql, t, (tx) =>
+      createItem(tx, { slug: `li-${randomUUID()}`, title: "T", bodyMarkdown: "corpo", format: "linkedin" }),
+    )
+    await connectChannel(sql, t, "linkedin", "tok")
+    await connectChannel(sql, t, "instagram", "tok")
+    const li = new MockChannel("linkedin")
+    const ig = new MockChannel("instagram")
+    const drivers = { linkedin: li, instagram: ig } as unknown as Drivers
+
+    const results = await publishItem(sql, t, item.id, drivers)
+    expect(results.map((r) => r.platform)).toEqual(["linkedin"])
+    expect(li.published).toHaveLength(1)
+    expect(ig.published).toHaveLength(0) // peça linkedin não vaza p/ instagram
+  })
+
   it("janela 48h: in_review vencido é promovido a published (silêncio = aprovado)", async () => {
     const t = await provisionTenant(sql, "pro")
     const item = await newItem(t, "janela")

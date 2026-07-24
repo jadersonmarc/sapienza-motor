@@ -31,6 +31,14 @@ export function defaultDrivers(): Drivers {
   }
 }
 
+// Canais-alvo por formato da peça: cada peça publica só nos canais do SEU canal
+// (blog cobre os canais de blog do cliente). Formato desconhecido = sem filtro.
+const PLATFORMS_FOR_FORMAT: Record<string, Platform[]> = {
+  blog: ["blog", "wordpress", "webhook"],
+  linkedin: ["linkedin"],
+  instagram: ["instagram"],
+}
+
 export class ChannelLimitError extends Error {}
 
 /**
@@ -113,15 +121,25 @@ export async function publishItem(
   // Conteúdo atual + slug + canais + rascunhos sociais, numa leitura tenant-scoped.
   const { slug, title, body, alreadyPublished, channels, socialByPlatform, sentPlatforms } = await withTenant(sql, tenantId, async (tx) => {
     const [item] = (await tx`
-      SELECT ci.slug, ci.published_at, cr.title, cr.body_markdown
+      SELECT ci.slug, ci.format, ci.published_at, cr.title, cr.body_markdown
         FROM content_items ci
         JOIN content_revisions cr ON cr.id = ci.current_revision_id
        WHERE ci.id = ${itemId}
-    `) as unknown as { slug: string; published_at: string | null; title: string; body_markdown: string }[]
+    `) as unknown as {
+      slug: string
+      format: string
+      published_at: string | null
+      title: string
+      body_markdown: string
+    }[]
     if (!item) throw new Error("peça ou revisão não encontrada")
-    const channels = (await tx`
+    // Publica SÓ nos canais do formato da peça (linkedin→linkedin, instagram→
+    // instagram, blog→blog/wordpress/webhook) — não espalha para todos.
+    const allowed = PLATFORMS_FOR_FORMAT[item.format] ?? null
+    const allChannels = (await tx`
       SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true
     `) as unknown as { platform: Platform; credentials_enc: string | null }[]
+    const channels = allowed ? allChannels.filter((c) => allowed.includes(c.platform)) : allChannels
     // Legendas sociais geradas (status draft|approved) — o publish as prefere ao markdown cru.
     const drafts = (await tx`
       SELECT DISTINCT ON (platform) platform, body, hashtags FROM social_drafts

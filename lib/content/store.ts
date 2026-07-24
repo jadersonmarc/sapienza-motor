@@ -15,8 +15,14 @@ export type ContentItem = {
   scheduled_at: string | null
   published_at: string | null
   regen_count: number
+  image_url: string | null
   /** título da revisão atual (presente em listItems; ausente em getItem). */
   title?: string | null
+}
+
+/** Grava a imagem on-brand escolhida da peça (gerada ou trocada pela biblioteca). */
+export async function setItemImage(tx: Tx, id: string, imageUrl: string): Promise<void> {
+  await tx`UPDATE content_items SET image_url = ${imageUrl}, updated_at = now() WHERE id = ${id}`
 }
 
 export type NewItem = {
