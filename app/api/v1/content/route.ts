@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
 import { createItem, listItems } from "@/lib/content/store"
+import { generatePieceImage } from "@/lib/content/piece-image"
 import { generateDraft, type ContentFormat } from "@/lib/ai/generate"
 
 const FORMATS: ContentFormat[] = ["blog", "linkedin", "instagram"]
@@ -61,6 +62,10 @@ export async function POST(req: Request): Promise<Response> {
       seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
       authorId: a.userId,
     }),
+  )
+  // A imagem on-brand nasce junto com a descrição (best-effort — sem storage, pula).
+  await generatePieceImage(sql, a.tenantId, item.id).catch((e) =>
+    console.error("[piece-image] falha ao gerar na criação:", e),
   )
   return json(201, { id: item.id, slug })
 }

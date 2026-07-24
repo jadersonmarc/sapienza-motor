@@ -5,6 +5,7 @@ import { canOperate } from "@/lib/platform/gating"
 import { getItem } from "@/lib/content/store"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
 import { generateDraft, type ContentFormat } from "@/lib/ai/generate"
+import { generatePieceImage } from "@/lib/content/piece-image"
 
 export const runtime = "nodejs"
 
@@ -26,6 +27,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       const draft = await generateDraft(prompt || "regenerar", format)
       return { title: draft.title, bodyMarkdown: draft.bodyMarkdown, excerpt: draft.excerpt }
     })
+    // Nova descrição → renova a imagem on-brand (best-effort).
+    await generatePieceImage(sql, a.tenantId, id).catch((e) =>
+      console.error("[piece-image] falha ao regenerar:", e),
+    )
     return json(200, { revisionId })
   } catch (e) {
     if (e instanceof RegenLimitError) return json(409, { error: e.message })

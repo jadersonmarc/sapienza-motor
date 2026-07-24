@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
 import { createItem } from "@/lib/content/store"
+import { generatePieceImage } from "@/lib/content/piece-image"
 import { generateFromBrief } from "@/lib/ai/brief"
 import { slugify } from "@/lib/content/slug"
 import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib/content/quota"
@@ -60,6 +61,9 @@ export async function POST(req: Request): Promise<Response> {
       seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
       authorId: a.userId,
     }),
+  )
+  await generatePieceImage(sql, a.tenantId, item.id).catch((e) =>
+    console.error("[piece-image] falha ao gerar no brief:", e),
   )
   return json(201, { id: item.id, slug })
 }
