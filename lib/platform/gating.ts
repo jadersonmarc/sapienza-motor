@@ -64,3 +64,20 @@ export async function channelLimit(sql: Sql, tenantId: string): Promise<number> 
   `) as unknown as { canais: number }[]
   return rows[0]?.canais ?? 0
 }
+
+// Cota da biblioteca de mídia (MB) por tier — cresce com o plano. Vem de
+// product_rules.rules.storage_mb = { start, pro, scale }. Fallback conservador
+// se as regras ainda não foram materializadas (pnpm pricing:sync).
+const DEFAULT_STORAGE_MB = 500
+
+export async function storageQuotaMb(sql: Sql, tenantId: string): Promise<number> {
+  const tier = await tierOf(sql, tenantId)
+  if (!tier) return 0
+  const rules = await productRules(sql)
+  const map = rules.storage_mb
+  if (map && typeof map === "object") {
+    const v = (map as Record<string, unknown>)[tier]
+    if (typeof v === "number") return v
+  }
+  return DEFAULT_STORAGE_MB
+}

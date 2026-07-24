@@ -2,21 +2,22 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { isPublicAssetUrl } from "@/lib/storage/s3"
 
 // Allowlist do que o servidor pode buscar a partir de entrada do usuário
-// (`?image=` do /api/og). Puro: não toca S3.
+// (`?image=` do /api/og). As imagens são servidas pelo proxy do motor, então a
+// base permitida é MOTOR_PUBLIC_URL + /api/media/. Puro: não toca S3.
 
 describe("isPublicAssetUrl", () => {
-  const original = process.env.S3_PUBLIC_URL
+  const original = process.env.MOTOR_PUBLIC_URL
   beforeEach(() => {
-    process.env.S3_PUBLIC_URL = "https://cdn.sapienza.com/midia"
+    process.env.MOTOR_PUBLIC_URL = "https://motor.sapienza.com"
   })
   afterEach(() => {
-    if (original === undefined) delete process.env.S3_PUBLIC_URL
-    else process.env.S3_PUBLIC_URL = original
+    if (original === undefined) delete process.env.MOTOR_PUBLIC_URL
+    else process.env.MOTOR_PUBLIC_URL = original
   })
 
-  it("aceita URLs do bucket público", () => {
-    expect(isPublicAssetUrl("https://cdn.sapienza.com/midia/social/ig/post.png")).toBe(true)
-    expect(isPublicAssetUrl("https://cdn.sapienza.com/midia/")).toBe(true)
+  it("aceita URLs do proxy de mídia", () => {
+    expect(isPublicAssetUrl("https://motor.sapienza.com/api/media/t1/social/instagram/post.png")).toBe(true)
+    expect(isPublicAssetUrl("https://motor.sapienza.com/api/media/")).toBe(true)
   })
 
   it("recusa alvos internos (SSRF)", () => {
@@ -28,26 +29,27 @@ describe("isPublicAssetUrl", () => {
   })
 
   it("recusa host que apenas começa com o nosso (prefixo não basta)", () => {
-    expect(isPublicAssetUrl("https://cdn.sapienza.com.evil.com/midia/x.png")).toBe(false)
-    expect(isPublicAssetUrl("https://evil.com/https://cdn.sapienza.com/midia/x.png")).toBe(false)
+    expect(isPublicAssetUrl("https://motor.sapienza.com.evil.com/api/media/x.png")).toBe(false)
+    expect(isPublicAssetUrl("https://evil.com/https://motor.sapienza.com/api/media/x.png")).toBe(false)
   })
 
-  it("recusa outro path no mesmo host", () => {
-    expect(isPublicAssetUrl("https://cdn.sapienza.com/privado/x.png")).toBe(false)
+  it("recusa outro path no mesmo host (fora de /api/media)", () => {
+    expect(isPublicAssetUrl("https://motor.sapienza.com/api/v1/content")).toBe(false)
+    expect(isPublicAssetUrl("https://motor.sapienza.com/privado/x.png")).toBe(false)
   })
 
   it("exige o mesmo protocolo", () => {
-    expect(isPublicAssetUrl("http://cdn.sapienza.com/midia/x.png")).toBe(false)
+    expect(isPublicAssetUrl("http://motor.sapienza.com/api/media/x.png")).toBe(false)
   })
 
   it("recusa URL malformada, relativa ou vazia", () => {
-    expect(isPublicAssetUrl("/midia/x.png")).toBe(false)
+    expect(isPublicAssetUrl("/api/media/x.png")).toBe(false)
     expect(isPublicAssetUrl("javascript:alert(1)")).toBe(false)
     expect(isPublicAssetUrl("")).toBe(false)
   })
 
-  it("recusa tudo quando não há bucket configurado (fail-closed)", () => {
-    delete process.env.S3_PUBLIC_URL
-    expect(isPublicAssetUrl("https://cdn.sapienza.com/midia/x.png")).toBe(false)
+  it("recusa tudo quando não há MOTOR_PUBLIC_URL (fail-closed)", () => {
+    delete process.env.MOTOR_PUBLIC_URL
+    expect(isPublicAssetUrl("https://motor.sapienza.com/api/media/x.png")).toBe(false)
   })
 })

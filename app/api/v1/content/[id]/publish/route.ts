@@ -49,7 +49,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!imageUrl && isImageConfigured()) {
     const info = await coverInfo(sql, a.tenantId, id)
     if (info && info.published_at == null) {
-      imageUrl = (await generateAndStoreCover({ slug: info.slug, title: info.title, pilar: info.pilar })) ?? undefined
+      imageUrl =
+        (await generateAndStoreCover(a.tenantId, { slug: info.slug, title: info.title, pilar: info.pilar })) ??
+        undefined
     }
   }
 

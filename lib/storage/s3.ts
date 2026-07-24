@@ -1,34 +1,45 @@
 import {
   S3Client,
   PutObjectCommand,
+  GetObjectCommand,
   ListObjectsV2Command,
   DeleteObjectCommand,
   CopyObjectCommand,
+  CreateBucketCommand,
+  HeadBucketCommand,
 } from "@aws-sdk/client-s3"
 
-const {
-  S3_ENDPOINT,
-  S3_REGION,
-  S3_BUCKET,
-  S3_ACCESS_KEY_ID,
-  S3_SECRET_ACCESS_KEY,
-  S3_PUBLIC_URL,
-} = process.env
+// Storage multi-tenant: UMA conta S3/R2 (credenciais globais), UM bucket por
+// tenant (`motor-<tenantId>`). Isolamento é o bucket, não prefixo de chave. As
+// imagens são servidas por um proxy público do motor (rota /api/media), então a
+// URL pública deriva de MOTOR_PUBLIC_URL — o bucket em si fica privado.
+
+const { S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, MOTOR_PUBLIC_URL } =
+  process.env
 
 export function isStorageConfigured(): boolean {
-  return Boolean(
-    S3_ENDPOINT &&
-      S3_BUCKET &&
-      S3_ACCESS_KEY_ID &&
-      S3_SECRET_ACCESS_KEY &&
-      S3_PUBLIC_URL,
-  )
+  return Boolean(S3_ENDPOINT && S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY && MOTOR_PUBLIC_URL)
+}
+
+/** Nome do bucket do tenant. UUID → `motor-<uuid>` (lowercase; válido em R2/S3). */
+export function bucketFor(tenantId: string): string {
+  return `motor-${tenantId.toLowerCase()}`
+}
+
+/** Base pública (via proxy do motor) das imagens de um tenant. */
+function publicBaseFor(tenantId: string): string {
+  return `${MOTOR_PUBLIC_URL!.replace(/\/$/, "")}/api/media/${tenantId}`
+}
+
+/** URL pública de uma key do tenant — aponta para o proxy do motor. */
+export function publicUrlForKey(tenantId: string, key: string): string {
+  return `${publicBaseFor(tenantId)}/${key}`
 }
 
 let client: S3Client | null = null
 function getClient(): S3Client {
   if (!isStorageConfigured()) {
-    throw new Error("Storage S3/MinIO não configurado (ver envs S3_*).")
+    throw new Error("Storage S3/R2 não configurado (ver envs S3_* e MOTOR_PUBLIC_URL).")
   }
   client ??= new S3Client({
     endpoint: S3_ENDPOINT,
@@ -42,28 +53,39 @@ function getClient(): S3Client {
   return client
 }
 
-// URL pública (CDN) de uma key. Requer storage configurado.
-export function publicUrlForKey(key: string): string {
-  return `${S3_PUBLIC_URL!.replace(/\/$/, "")}/${key}`
+/** Cria o bucket do tenant se ainda não existir (idempotente). Chamado no
+ *  provisionamento (SubscriptionActivated{motor}). Requer credencial com permissão. */
+export async function createBucketIfMissing(tenantId: string): Promise<void> {
+  const Bucket = bucketFor(tenantId)
+  const s3 = getClient()
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket }))
+    return // já existe e é acessível
+  } catch {
+    /* não existe (ou 403) — tenta criar */
+  }
+  try {
+    await s3.send(new CreateBucketCommand({ Bucket }))
+  } catch (e) {
+    const name = (e as { name?: string })?.name ?? ""
+    if (name === "BucketAlreadyOwnedByYou" || name === "BucketAlreadyExists") return
+    throw e
+  }
 }
 
 /**
- * A URL aponta para o nosso bucket público?
+ * A URL aponta para o proxy público de mídia do motor?
  *
- * Allowlist para tudo que o servidor vai BUSCAR a partir de entrada do usuário
- * (hoje: o `?image=` do /api/og, que o Satori resolve server-side). Sem isto a
- * rota é um SSRF: qualquer URL interna da VPS seria buscada e cacheada.
- *
- * Compara origin + prefixo de path, então um host que apenas *comece* com o
- * nosso (`cdn.exemplo.com.evil.com`) não passa. Lê `process.env` na hora em vez
- * da const de módulo para não congelar o valor no import.
+ * Allowlist para o que o servidor vai BUSCAR a partir de entrada do usuário (o
+ * `?image=` do /api/og, resolvido server-side pelo Satori). Sem isto a rota é um
+ * SSRF. Compara origin + prefixo de path `/api/media/`.
  */
 export function isPublicAssetUrl(candidate: string): boolean {
-  const base = process.env.S3_PUBLIC_URL
+  const base = process.env.MOTOR_PUBLIC_URL
   if (!base) return false
   try {
     const url = new URL(candidate)
-    const allowed = new URL(base.replace(/\/$/, "") + "/")
+    const allowed = new URL(base.replace(/\/$/, "") + "/api/media/")
     if (url.protocol !== allowed.protocol || url.host !== allowed.host) return false
     return url.pathname.startsWith(allowed.pathname)
   } catch {
@@ -71,21 +93,32 @@ export function isPublicAssetUrl(candidate: string): boolean {
   }
 }
 
-// Sobe um objeto e retorna a URL pública (S3_PUBLIC_URL/key).
+// Sobe um objeto no bucket do tenant e devolve a URL pública (proxy).
 export async function uploadObject(
+  tenantId: string,
   key: string,
   body: Buffer,
   contentType: string,
 ): Promise<string> {
   await getClient().send(
-    new PutObjectCommand({
-      Bucket: S3_BUCKET,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-    }),
+    new PutObjectCommand({ Bucket: bucketFor(tenantId), Key: key, Body: body, ContentType: contentType }),
   )
-  return `${S3_PUBLIC_URL!.replace(/\/$/, "")}/${key}`
+  return publicUrlForKey(tenantId, key)
+}
+
+/** Busca os bytes de um objeto (alimenta o proxy público). null se não existir. */
+export async function getObject(
+  tenantId: string,
+  key: string,
+): Promise<{ body: Uint8Array; contentType?: string } | null> {
+  try {
+    const res = await getClient().send(new GetObjectCommand({ Bucket: bucketFor(tenantId), Key: key }))
+    if (!res.Body) return null
+    const body = await res.Body.transformToByteArray()
+    return { body, contentType: res.ContentType }
+  } catch {
+    return null
+  }
 }
 
 export interface StoredObject {
@@ -104,14 +137,12 @@ type ListedItem = { Key?: string; Size?: number; LastModified?: Date }
 
 // Mapeia o retorno do ListObjectsV2 para {key, url, size?, lastModified?}. Puro
 // (testável): descarta chaves vazias e "pseudo-pastas" (terminadas em "/").
-export function mapListedObjects(
-  contents: ListedItem[] | undefined,
-  publicUrl: string,
-): StoredObject[] {
-  const base = publicUrl.replace(/\/$/, "")
+export function mapListedObjects(contents: ListedItem[] | undefined, publicBase: string): StoredObject[] {
+  const base = publicBase.replace(/\/$/, "")
   return (contents ?? [])
-    .filter((o): o is ListedItem & { Key: string } =>
-      typeof o.Key === "string" && o.Key.length > 0 && !o.Key.endsWith("/"),
+    .filter(
+      (o): o is ListedItem & { Key: string } =>
+        typeof o.Key === "string" && o.Key.length > 0 && !o.Key.endsWith("/"),
     )
     .map((o) => {
       const obj: StoredObject = { key: o.Key, url: `${base}/${o.Key}` }
@@ -121,43 +152,55 @@ export function mapListedObjects(
     })
 }
 
-// Lista objetos de uma pasta (prefixo), com paginação por continuation token.
+// Lista objetos de uma pasta (prefixo) no bucket do tenant, paginado.
 export async function listObjects(
+  tenantId: string,
   prefix: string,
   opts: { token?: string; max?: number } = {},
 ): Promise<ListResult> {
   const res = await getClient().send(
     new ListObjectsV2Command({
-      Bucket: S3_BUCKET,
+      Bucket: bucketFor(tenantId),
       Prefix: prefix,
       MaxKeys: opts.max ?? 100,
       ContinuationToken: opts.token,
     }),
   )
   return {
-    objects: mapListedObjects(res.Contents, S3_PUBLIC_URL!),
+    objects: mapListedObjects(res.Contents, publicBaseFor(tenantId)),
     nextToken: res.NextContinuationToken,
   }
 }
 
-// Versão simples (sem paginação) — alimenta o picker. Mantida por compat.
-export async function listObjectsByPrefix(prefix: string, max = 100): Promise<StoredObject[]> {
-  return (await listObjects(prefix, { max })).objects
+// Versão simples (sem paginação) — alimenta o picker.
+export async function listObjectsByPrefix(tenantId: string, prefix: string, max = 100): Promise<StoredObject[]> {
+  return (await listObjects(tenantId, prefix, { max })).objects
 }
 
-// Remove um objeto do bucket.
-export async function deleteObject(key: string): Promise<void> {
-  await getClient().send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key }))
+// Soma os bytes usados no bucket do tenant (todas as pastas), paginando. Alimenta
+// a cota da biblioteca. Sem storage configurado, 0.
+export async function usedBytes(tenantId: string): Promise<number> {
+  if (!isStorageConfigured()) return 0
+  let total = 0
+  let token: string | undefined
+  do {
+    const res = await listObjects(tenantId, "", { token, max: 1000 })
+    for (const o of res.objects) total += o.size ?? 0
+    token = res.nextToken
+  } while (token)
+  return total
 }
 
-// Copia um objeto para uma nova key e devolve a URL pública do destino.
-export async function copyObject(srcKey: string, destKey: string): Promise<string> {
+// Remove um objeto do bucket do tenant.
+export async function deleteObject(tenantId: string, key: string): Promise<void> {
+  await getClient().send(new DeleteObjectCommand({ Bucket: bucketFor(tenantId), Key: key }))
+}
+
+// Copia um objeto (dentro do bucket do tenant) e devolve a URL pública do destino.
+export async function copyObject(tenantId: string, srcKey: string, destKey: string): Promise<string> {
+  const Bucket = bucketFor(tenantId)
   await getClient().send(
-    new CopyObjectCommand({
-      Bucket: S3_BUCKET,
-      CopySource: encodeURI(`${S3_BUCKET}/${srcKey}`),
-      Key: destKey,
-    }),
+    new CopyObjectCommand({ Bucket, CopySource: encodeURI(`${Bucket}/${srcKey}`), Key: destKey }),
   )
-  return `${S3_PUBLIC_URL!.replace(/\/$/, "")}/${destKey}`
+  return publicUrlForKey(tenantId, destKey)
 }

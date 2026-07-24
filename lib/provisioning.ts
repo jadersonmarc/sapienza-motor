@@ -3,6 +3,19 @@ import { applyTenantMigrations } from "@/lib/platform/tenancy"
 import { tenantMigrations } from "@/lib/db/migrations"
 import { cursor, fetchAfter, ack } from "@/lib/platform/events"
 import { PRODUTO } from "@/lib/platform/gating"
+import { createBucketIfMissing, isStorageConfigured } from "@/lib/storage/s3"
+
+// Cria o bucket de mídia do tenant (motor-<id>) no provisionamento. Best-effort:
+// storage é um seam (sem envs S3_*, pula) e uma falha aqui não pode travar a
+// migration — a biblioteca de mídia fica indisponível até o bucket existir, só.
+async function ensureTenantBucket(tenantId: string): Promise<void> {
+  if (!isStorageConfigured()) return
+  try {
+    await createBucketIfMissing(tenantId)
+  } catch (e) {
+    console.error(`[provisioning] falha ao criar bucket do tenant ${tenantId}:`, e)
+  }
+}
 
 // Escuta o outbox (public.event_outbox) via cursor (bus.event_cursors). Em
 // SubscriptionActivated{motor}, aplica as migrations de tenant no schema tenant_<id>
@@ -18,6 +31,7 @@ export async function processOutbox(sql: Sql): Promise<number> {
     const produto = e.produto ?? (e.payload?.produto as string | undefined)
     if (e.type === "SubscriptionActivated" && produto === PRODUTO) {
       await applyTenantMigrations(sql, e.tenant_id, migrations)
+      await ensureTenantBucket(e.tenant_id)
     }
   }
   await ack(sql, events[events.length - 1].id)
@@ -30,5 +44,8 @@ export async function catchUp(sql: Sql): Promise<void> {
     SELECT tenant_id FROM public.subscriptions WHERE produto = ${PRODUTO} AND status = 'active'
   `) as unknown as { tenant_id: string }[]
   const migrations = tenantMigrations()
-  for (const r of rows) await applyTenantMigrations(sql, r.tenant_id, migrations)
+  for (const r of rows) {
+    await applyTenantMigrations(sql, r.tenant_id, migrations)
+    await ensureTenantBucket(r.tenant_id)
+  }
 }
