@@ -31,12 +31,12 @@ export function defaultDrivers(): Drivers {
   }
 }
 
-// Canais-alvo por formato da peça: cada peça publica só nos canais do SEU canal
-// (blog cobre os canais de blog do cliente). Formato desconhecido = sem filtro.
-const PLATFORMS_FOR_FORMAT: Record<string, Platform[]> = {
-  blog: ["blog", "wordpress", "webhook"],
-  linkedin: ["linkedin"],
-  instagram: ["instagram"],
+// Formatos sociais publicam SÓ no seu canal (um post de LinkedIn não vaza p/ o
+// Instagram). Blog e demais formatos publicam em todos os canais conectados
+// (comportamento antigo — cobre blog/wordpress/webhook/facebook/twitter/threads).
+const SOCIAL_ONLY: Record<string, Platform> = {
+  linkedin: "linkedin",
+  instagram: "instagram",
 }
 
 export class ChannelLimitError extends Error {}
@@ -133,13 +133,12 @@ export async function publishItem(
       body_markdown: string
     }[]
     if (!item) throw new Error("peça ou revisão não encontrada")
-    // Publica SÓ nos canais do formato da peça (linkedin→linkedin, instagram→
-    // instagram, blog→blog/wordpress/webhook) — não espalha para todos.
-    const allowed = PLATFORMS_FOR_FORMAT[item.format] ?? null
+    // Peça social publica só no seu canal; blog/demais em todos os conectados.
+    const only = SOCIAL_ONLY[item.format]
     const allChannels = (await tx`
       SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true
     `) as unknown as { platform: Platform; credentials_enc: string | null }[]
-    const channels = allowed ? allChannels.filter((c) => allowed.includes(c.platform)) : allChannels
+    const channels = only ? allChannels.filter((c) => c.platform === only) : allChannels
     // Legendas sociais geradas (status draft|approved) — o publish as prefere ao markdown cru.
     const drafts = (await tx`
       SELECT DISTINCT ON (platform) platform, body, hashtags FROM social_drafts
