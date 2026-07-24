@@ -139,9 +139,10 @@ export class InstagramChannel implements Channel {
   }
 }
 
-// Versão da LinkedIn Posts API (mensal, AAAAMM). Se a resposta reclamar de versão
-// inválida, é só bumpar aqui.
-const LINKEDIN_VERSION = "202505"
+// Versão da LinkedIn Posts API (mensal, AAAAMM). O LinkedIn mantém só ~12 meses
+// ativos e devolve 426 NONEXISTENT_VERSION quando a versão expira. Dá pra bumpar
+// por env (LINKEDIN_API_VERSION) sem redeploy quando isso acontecer de novo.
+const LINKEDIN_VERSION = process.env.LINKEDIN_API_VERSION?.trim() || "202605"
 
 // A Posts API usa "little text format": estes caracteres reservados precisam ser
 // escapados com \. Over-escapar é seguro (renderiza literal); under-escapar dá 422.
