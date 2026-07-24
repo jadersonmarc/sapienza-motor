@@ -8,6 +8,7 @@ export type ContentItem = {
   id: string
   slug: string
   status: ContentStatus
+  format: string
   pilar: string | null
   current_revision_id: string | null
   review_deadline_at: string | null
@@ -23,6 +24,7 @@ export type NewItem = {
   title: string
   bodyMarkdown: string
   excerpt?: string
+  format?: string
   pilar?: string | null
   authorId?: string | null
   /** SEO (ex.: { keywords: string[] }) — persistido no jsonb da revisão. */
@@ -32,8 +34,8 @@ export type NewItem = {
 /** Cria uma peça em draft + 1ª revisão, apontando current_revision_id. */
 export async function createItem(tx: Tx, input: NewItem): Promise<ContentItem> {
   const [item] = (await tx`
-    INSERT INTO content_items (slug, pilar, author_id)
-    VALUES (${input.slug}, ${input.pilar ?? null}, ${input.authorId ?? null})
+    INSERT INTO content_items (slug, pilar, format, author_id)
+    VALUES (${input.slug}, ${input.pilar ?? null}, ${input.format ?? "blog"}, ${input.authorId ?? null})
     RETURNING *
   `) as unknown as ContentItem[]
   // jsonb via tx.json (nunca JSON.stringify::jsonb — re-encoda e quebra o payload).

@@ -49,7 +49,7 @@ export async function POST(req: Request): Promise<Response> {
       const avoidTitles = await withTenant(sql, tenantId, (tx) => listItemTitles(tx))
       let draft
       try {
-        draft = await generateDraft(prompt, { avoidTitles, themeSeeds: body.themeSeeds })
+        draft = await generateDraft(prompt, "blog", { avoidTitles, themeSeeds: body.themeSeeds })
       } catch (e) {
         await refundGeneration(sql, tenantId)
         throw e

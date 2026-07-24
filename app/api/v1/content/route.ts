@@ -3,7 +3,9 @@ import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
 import { createItem, listItems } from "@/lib/content/store"
-import { generateDraft } from "@/lib/ai/generate"
+import { generateDraft, type ContentFormat } from "@/lib/ai/generate"
+
+const FORMATS: ContentFormat[] = ["blog", "linkedin", "instagram"]
 import { slugify } from "@/lib/content/slug"
 import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib/content/quota"
 
@@ -25,9 +27,12 @@ export async function POST(req: Request): Promise<Response> {
   const sql = getDb()
   if (!(await canOperate(sql, a.tenantId))) return json(403, { error: "subscription not active" })
 
-  const body = (await req.json().catch(() => ({}))) as { prompt?: string }
+  const body = (await req.json().catch(() => ({}))) as { prompt?: string; format?: string }
   const prompt = (body.prompt ?? "").trim()
   if (!prompt) return json(400, { error: "prompt required" })
+  const format: ContentFormat = FORMATS.includes(body.format as ContentFormat)
+    ? (body.format as ContentFormat)
+    : "blog"
 
   // Debita a cota antes de chamar o modelo — é a chamada que custa.
   try {
@@ -39,7 +44,7 @@ export async function POST(req: Request): Promise<Response> {
 
   let draft
   try {
-    draft = await generateDraft(prompt)
+    draft = await generateDraft(prompt, format)
   } catch (e) {
     await refundGeneration(sql, a.tenantId) // não gerou: devolve a cota
     throw e
@@ -52,6 +57,7 @@ export async function POST(req: Request): Promise<Response> {
       title: draft.title,
       bodyMarkdown: draft.bodyMarkdown,
       excerpt: draft.excerpt,
+      format,
       seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
       authorId: a.userId,
     }),

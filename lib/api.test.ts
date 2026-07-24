@@ -116,6 +116,20 @@ maybe("motor API", () => {
     expect(data.items.find((i) => i.slug === "do-a")).toBeUndefined()
   })
 
+  it("cria peça com o format do canal (linkedin)", async () => {
+    const t = await provisionTenant(sql)
+    const tok = await token(t)
+    const { POST } = await import("@/app/api/v1/content/route")
+    const res = await POST(req("POST", "/api/v1/content", tok, { prompt: "tema de teste", format: "linkedin" }))
+    expect(res.status).toBe(201)
+    const { id } = (await res.json()) as { id: string }
+
+    const { GET } = await import("@/app/api/v1/content/[id]/route")
+    const got = await GET(req("GET", `/api/v1/content/${id}`, tok), { params: Promise.resolve({ id }) })
+    const detail = (await got.json()) as { format: string }
+    expect(detail.format).toBe("linkedin")
+  })
+
   it("PUT /content/:id edita → nova revisão atual", async () => {
     const t = await provisionTenant(sql)
     const item = await withTenant(sql, t, (tx) =>

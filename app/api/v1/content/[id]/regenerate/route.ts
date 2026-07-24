@@ -1,8 +1,10 @@
 import { authed, isResponse, json } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
+import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
+import { getItem } from "@/lib/content/store"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
-import { generateDraft } from "@/lib/ai/generate"
+import { generateDraft, type ContentFormat } from "@/lib/ai/generate"
 
 export const runtime = "nodejs"
 
@@ -16,9 +18,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const body = (await req.json().catch(() => ({}))) as { prompt?: string }
   const prompt = (body.prompt ?? "").trim()
+  // Regenera no MESMO formato da peça (blog vs post social).
+  const item = await withTenant(sql, a.tenantId, (tx) => getItem(tx, id))
+  const format = (item?.format ?? "blog") as ContentFormat
   try {
     const revisionId = await regenerate(sql, a.tenantId, id, async () => {
-      const draft = await generateDraft(prompt || "regenerar")
+      const draft = await generateDraft(prompt || "regenerar", format)
       return { title: draft.title, bodyMarkdown: draft.bodyMarkdown, excerpt: draft.excerpt }
     })
     return json(200, { revisionId })
