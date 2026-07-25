@@ -96,47 +96,22 @@ describe("LinkedinChannel", () => {
     expect(sent.lifecycleState).toBe("PUBLISHED")
   })
 
-  it("anexa a imagem on-brand: sobe no /rest/images e referencia em content.media", async () => {
+  it("post é só texto — nunca inclui content.media (imagem entra depois, fora do publish)", async () => {
     const fetchMock = vi.fn(async (u: string) => {
       if (u === "https://api.linkedin.com/v2/userinfo")
         return new Response(JSON.stringify({ sub: "abc123" }), { status: 200 })
-      if (u === "https://api.linkedin.com/rest/images?action=initializeUpload")
-        return new Response(JSON.stringify({ value: { uploadUrl: "https://upload.li/here", image: "urn:li:image:42" } }), {
-          status: 200,
-        })
-      if (u === "https://cdn/x.png") return new Response("PNGBYTES", { status: 200 })
-      if (u === "https://upload.li/here") return new Response("", { status: 201 })
-      if (u === "https://api.linkedin.com/rest/posts")
-        return new Response("", { status: 201, headers: { "x-restli-id": "urn:li:share:999" } })
-      return new Response("", { status: 404 })
-    })
-    vi.stubGlobal("fetch", fetchMock)
-
-    await new LinkedinChannel().publish(input, "tok")
-
-    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][]
-    const post = calls.find(([u]) => u === "https://api.linkedin.com/rest/posts")!
-    const sent = JSON.parse(post[1].body as string)
-    expect(sent.content.media.id).toBe("urn:li:image:42")
-    // e o binário foi enviado no PUT do uploadUrl
-    expect(calls.some(([u, init]) => u === "https://upload.li/here" && init.method === "PUT")).toBe(true)
-  })
-
-  it("imagem falhando não bloqueia o post (sai só com texto)", async () => {
-    const fetchMock = vi.fn(async (u: string) => {
-      if (u === "https://api.linkedin.com/v2/userinfo")
-        return new Response(JSON.stringify({ sub: "abc123" }), { status: 200 })
-      if (u === "https://api.linkedin.com/rest/images?action=initializeUpload")
-        return new Response("", { status: 500 }) // upload indisponível
       if (u === "https://api.linkedin.com/rest/posts")
         return new Response("", { status: 201, headers: { "x-restli-id": "urn:li:share:1" } })
       return new Response("", { status: 404 })
     })
     vi.stubGlobal("fetch", fetchMock)
 
+    // input traz imageUrl, mas o post ignora — sai só com texto.
     const { url } = await new LinkedinChannel().publish(input, "tok")
     expect(url).toContain("urn:li:share:1")
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][]
+    // Não toca no /rest/images nem em nenhum upload de imagem.
+    expect(calls.some(([u]) => u.includes("/rest/images"))).toBe(false)
     const post = calls.find(([u]) => u === "https://api.linkedin.com/rest/posts")!
     expect(JSON.parse(post[1].body as string).content).toBeUndefined()
   })

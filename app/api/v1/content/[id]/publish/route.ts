@@ -5,18 +5,9 @@ import { canOperate } from "@/lib/platform/gating"
 import { publishItem, PartialPublishError } from "@/lib/channels/registry"
 import { TransitionError } from "@/lib/content/state-machine"
 import { assertPublishAllowed, PublishCapError } from "@/lib/content/quota"
-import { generateAndStoreCover, isImageConfigured } from "@/lib/brand/social-image"
-import type { FormatId } from "@/lib/brand/formats"
+import { isImageConfigured } from "@/lib/brand/social-image"
 
 export const runtime = "nodejs"
-
-// Formato on-brand por canal da peça — a capa é "projetada para cada mídia" e o
-// r2KeyFor a grava na pasta certa (blog→articles, linkedin→social/linkedin, …).
-const COVER_FORMAT: Record<string, FormatId> = {
-  blog: "blog-og",
-  linkedin: "li-feed",
-  instagram: "ig-feed",
-}
 
 // Lê o essencial da peça (sob withTenant) p/ gerar a capa on-brand antes de publicar.
 async function coverInfo(sql: ReturnType<typeof getDb>, tenantId: string, id: string) {
@@ -60,24 +51,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const body = (await req.json().catch(() => ({}))) as { imageUrl?: string }
   let imageUrl = body.imageUrl
 
-  // Imagem: prioridade (1) a escolhida no editor (content_items.image_url), depois
-  // (2) gerar na hora. Só se storage configurado e a peça ainda não foi publicada
-  // (republicar é idempotente — não re-renderiza nem re-posta).
+  // Imagem: usa a que já está salva na peça (gerada na criação/editor) — SEM
+  // renderizar Satori aqui. Renderizar no publish deixava a requisição pesada e
+  // estourava o proxy (503). A imagem já nasce na criação e fica na biblioteca.
   if (!imageUrl && isImageConfigured()) {
     const info = await coverInfo(sql, a.tenantId, id)
-    if (info && info.published_at == null) {
-      if (info.image_url) {
-        imageUrl = info.image_url
-      } else {
-        const formatId = COVER_FORMAT[info.format] ?? "ig-feed"
-        imageUrl =
-          (await generateAndStoreCover(a.tenantId, {
-            slug: info.slug,
-            title: info.title,
-            pilar: info.pilar,
-            formatId,
-          })) ?? undefined
-      }
+    if (info && info.published_at == null && info.image_url) {
+      imageUrl = info.image_url
     }
   }
 
