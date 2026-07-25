@@ -28,6 +28,9 @@ export async function PUT(req: Request): Promise<Response> {
   const themes = Array.isArray(body.themes)
     ? (body.themes as unknown[]).map((t) => String(t).trim()).filter(Boolean).slice(0, 20)
     : []
+  // Cadência: dias entre gerações automáticas. Limita a [1, 60]; default 7.
+  const cadence = Number(body.cadence_days)
+  const cadence_days = Number.isFinite(cadence) ? Math.min(60, Math.max(1, Math.round(cadence))) : 7
   const cfg: EditorConfig = {
     system_prompt: String(body.system_prompt ?? "").trim(),
     tone: String(body.tone ?? "").trim(),
@@ -35,6 +38,7 @@ export async function PUT(req: Request): Promise<Response> {
     format,
     model: body.model ? String(body.model).trim() : null,
     enabled: body.enabled !== false,
+    cadence_days,
   }
 
   const sql = getDb()

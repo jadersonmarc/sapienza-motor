@@ -180,7 +180,7 @@ maybe("motor data plane", () => {
   it("editor_config: defaults quando vazio; upsert persiste", async () => {
     const t = await provisionTenant(sql, "pro")
     const def = await withTenant(sql, t, (tx) => getEditorConfig(tx))
-    expect(def).toEqual({ system_prompt: "", tone: "", themes: [], format: "blog", model: null, enabled: true })
+    expect(def).toEqual({ system_prompt: "", tone: "", themes: [], format: "blog", model: null, enabled: true, cadence_days: 7 })
 
     await withTenant(sql, t, (tx) =>
       upsertEditorConfig(tx, {
@@ -190,6 +190,7 @@ maybe("motor data plane", () => {
         format: "linkedin",
         model: "claude-sonnet-5",
         enabled: false,
+        cadence_days: 14,
       }),
     )
     const got = await withTenant(sql, t, (tx) => getEditorConfig(tx))
@@ -197,6 +198,7 @@ maybe("motor data plane", () => {
     expect(got.themes).toEqual(["automação", "crm"])
     expect(got.format).toBe("linkedin")
     expect(got.enabled).toBe(false)
+    expect(got.cadence_days).toBe(14)
   })
 
   it("isolamento: conteúdo não vaza entre tenants", async () => {
