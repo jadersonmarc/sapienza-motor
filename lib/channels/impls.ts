@@ -151,11 +151,16 @@ function escapeLinkedinText(text: string): string {
   return text.replace(/[\\|{}@[\]()<>#*_~]/g, (c) => "\\" + c)
 }
 
+// Timeout de toda chamada ao LinkedIn — sem isto, uma API lenta pendura o publish
+// até o proxy cortar com 503. Falha rápida vira erro tratável, não gateway timeout.
+const LI_TIMEOUT = 15000
+
 // Resolve o urn:li:person do dono do token via OpenID userinfo (fallback /v2/me),
 // para o usuário só precisar colar o access_token. Requer escopo openid/profile.
 async function resolveLinkedinAuthor(accessToken: string): Promise<string> {
   const ui = await fetch("https://api.linkedin.com/v2/userinfo", {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(LI_TIMEOUT),
   })
   if (ui.ok) {
     const { sub } = (await ui.json()) as { sub?: string }
@@ -163,6 +168,7 @@ async function resolveLinkedinAuthor(accessToken: string): Promise<string> {
   }
   const me = await fetch("https://api.linkedin.com/v2/me", {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(LI_TIMEOUT),
   })
   if (me.ok) {
     const { id } = (await me.json()) as { id?: string }
@@ -187,6 +193,7 @@ async function uploadLinkedinImage(accessToken: string, authorUrn: string, image
         "X-Restli-Protocol-Version": "2.0.0",
       },
       body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
+      signal: AbortSignal.timeout(LI_TIMEOUT),
     })
     if (!init.ok) {
       console.error(`[linkedin-image] initializeUpload ${init.status}: ${await init.text().catch(() => "")}`)
@@ -210,6 +217,7 @@ async function uploadLinkedinImage(accessToken: string, authorUrn: string, image
       method: "PUT",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "image/png" },
       body: bytes,
+      signal: AbortSignal.timeout(LI_TIMEOUT),
     })
     if (!up.ok) {
       console.error(`[linkedin-image] PUT do upload ${up.status}: ${await up.text().catch(() => "")}`)
@@ -265,6 +273,7 @@ export class LinkedinChannel implements Channel {
         lifecycleState: "PUBLISHED",
         isReshareDisabledByAuthor: false,
       }),
+      signal: AbortSignal.timeout(LI_TIMEOUT),
     })
     if (!res.ok) {
       throw new Error(`linkedin posts: ${res.status} ${await res.text().catch(() => "")}`)
