@@ -2,6 +2,11 @@ import { createHmac } from "node:crypto"
 import { marked } from "marked"
 import type { Channel, Platform, PublishInput } from "./types"
 
+// Corta o texto ao limite da rede (com reticências), evitando 400 por tamanho.
+function cap(text: string, max: number): string {
+  return text.length <= max ? text : text.slice(0, max - 1).trimEnd() + "…"
+}
+
 // Impls concretas. Blog é canal interno (sem credencial). Instagram e LinkedIn
 // falam com as APIs oficiais (adaptado de spa-sapienza/lib/social/*); só rodam em
 // produção — nos testes usamos MockChannel. Credenciais chegam decifradas (JSON).
@@ -102,6 +107,7 @@ export class WebhookChannel implements Channel {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Sapienza-Signature": `sha256=${signature}` },
       body: payload,
+      signal: AbortSignal.timeout(20000),
     })
     if (!res.ok) throw new Error(`webhook: ${res.status}`)
     const data = (await res.json().catch(() => ({}))) as { url?: string }
@@ -113,7 +119,7 @@ export class InstagramChannel implements Channel {
   readonly platform: Platform = "instagram"
   async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
     if (!credentials) throw new Error("instagram: credenciais ausentes")
-    if (!input.imageUrl) throw new Error("instagram: imagem (URL pública) obrigatória")
+    if (!input.imageUrl) throw new Error("instagram: gere a imagem da peça antes de publicar")
     const { access_token, account_id } = JSON.parse(credentials) as {
       access_token: string
       account_id: string
@@ -123,15 +129,17 @@ export class InstagramChannel implements Channel {
     const create = await fetch(`${base}/${account_id}/media`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image_url: input.imageUrl, caption: input.body, access_token }),
+      body: JSON.stringify({ image_url: input.imageUrl, caption: cap(input.body, 2200), access_token }),
+      signal: AbortSignal.timeout(20000),
     })
-    if (!create.ok) throw new Error(`instagram media: ${create.status}`)
+    if (!create.ok) throw new Error(`instagram media: ${create.status} ${await create.text().catch(() => "")}`)
     const { id: creationId } = (await create.json()) as { id: string }
     // 2) publica o container
     const pub = await fetch(`${base}/${account_id}/media_publish`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ creation_id: creationId, access_token }),
+      signal: AbortSignal.timeout(20000),
     })
     if (!pub.ok) throw new Error(`instagram publish: ${pub.status}`)
     const { id: mediaId } = (await pub.json()) as { id: string }
@@ -209,7 +217,7 @@ export class LinkedinChannel implements Channel {
       },
       body: JSON.stringify({
         author: authorUrn,
-        commentary: escapeLinkedinText(`${input.title}\n\n${input.body}`),
+        commentary: escapeLinkedinText(cap(`${input.title}\n\n${input.body}`, 3000)),
         visibility: "PUBLIC",
         distribution: {
           feedDistribution: "MAIN_FEED",
@@ -248,6 +256,7 @@ export class FacebookChannel implements Channel {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20000),
     })
     if (!res.ok) throw new Error(`facebook ${input.imageUrl ? "photos" : "feed"}: ${res.status}`)
     const { id, post_id } = (await res.json()) as { id: string; post_id?: string }
@@ -269,6 +278,7 @@ export class TwitterChannel implements Channel {
       method: "POST",
       headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(20000),
     })
     if (!res.ok) throw new Error(`twitter tweets: ${res.status}`)
     const { data } = (await res.json()) as { data: { id: string } }
@@ -291,10 +301,11 @@ export class ThreadsChannel implements Channel {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         media_type: input.imageUrl ? "IMAGE" : "TEXT",
-        text: input.body,
+        text: cap(input.body, 500),
         ...(input.imageUrl ? { image_url: input.imageUrl } : {}),
         access_token,
       }),
+      signal: AbortSignal.timeout(20000),
     })
     if (!create.ok) throw new Error(`threads create: ${create.status}`)
     const { id: creationId } = (await create.json()) as { id: string }
@@ -303,6 +314,7 @@ export class ThreadsChannel implements Channel {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ creation_id: creationId, access_token }),
+      signal: AbortSignal.timeout(20000),
     })
     if (!pub.ok) throw new Error(`threads publish: ${pub.status}`)
     const { id } = (await pub.json()) as { id: string }

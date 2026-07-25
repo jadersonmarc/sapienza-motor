@@ -251,18 +251,22 @@ maybe("motor data plane", () => {
     await expect(connectChannel(sql, t, "instagram")).rejects.toBeInstanceOf(ChannelLimitError)
   })
 
-  it("canais novos: facebook/twitter/threads conectam e publicam (dentro do tier)", async () => {
+  it("publica só nos canais do formato: peça de blog não vaza p/ social", async () => {
     const t = await provisionTenant(sql, "scale") // 3 canais
-    const item = await newItem(t, "multi-canal")
-    await connectChannel(sql, t, "facebook")
-    await connectChannel(sql, t, "twitter")
-    await connectChannel(sql, t, "threads")
-    const mk = (p: "facebook" | "twitter" | "threads") => new MockChannel(p)
-    const fb = mk("facebook"), tw = mk("twitter"), th = mk("threads")
-    const drivers = { blog: fb, instagram: fb, linkedin: fb, facebook: fb, twitter: tw, threads: th } as unknown as Drivers
+    const item = await newItem(t, "so-blog") // formato blog (default)
+    await connectChannel(sql, t, "blog")
+    await connectChannel(sql, t, "instagram", "tok")
+    await connectChannel(sql, t, "linkedin", "tok")
+    const blog = new MockChannel("blog")
+    const ig = new MockChannel("instagram")
+    const li = new MockChannel("linkedin")
+    const drivers = { blog, instagram: ig, linkedin: li } as unknown as Drivers
+
     const res = await publishItem(sql, t, item.id, drivers)
-    expect(res.map((r) => r.platform).sort()).toEqual(["facebook", "threads", "twitter"])
-    expect(await usage(sql, t, "peca")).toBe(1) // uma peça, 3 canais = 1 unidade
+    expect(res.map((r) => r.platform)).toEqual(["blog"]) // só o canal de blog
+    expect(ig.published).toHaveLength(0)
+    expect(li.published).toHaveLength(0)
+    expect(await usage(sql, t, "peca")).toBe(1)
   })
 
   it("publishItem: publica no canal (mock) e fatura 1 peça", async () => {
@@ -298,11 +302,12 @@ maybe("motor data plane", () => {
   it("publishItem: falha parcial não reposta no canal que deu certo nem refatura", async () => {
     const t = await provisionTenant(sql, "pro")
     const item = await newItem(t, "falha-parcial")
+    // Dois canais de BLOG (o formato da peça): um publica, o outro falha.
     await connectChannel(sql, t, "blog")
-    await connectChannel(sql, t, "instagram")
+    await connectChannel(sql, t, "webhook", "segredo")
     const bom = new MockChannel("blog")
-    const quebrado = new FailingChannel("instagram", "instagram: 500 upstream")
-    const drivers = { blog: bom, instagram: quebrado, linkedin: bom } as unknown as Drivers
+    const quebrado = new FailingChannel("webhook", "webhook: 500 upstream")
+    const drivers = { blog: bom, webhook: quebrado } as unknown as Drivers
 
     // Ciclo 1: blog publica, instagram falha → erro parcial, mas a peça já é pública.
     await expect(publishItem(sql, t, item.id, drivers)).rejects.toThrow(PartialPublishError)
