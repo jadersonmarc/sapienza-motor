@@ -4,6 +4,7 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
 import { createItem, listItems } from "@/lib/content/store"
 import { generatePieceImage } from "@/lib/content/piece-image"
+import { getEditorConfig } from "@/lib/content/editor-config"
 import { generateDraft, type ContentFormat } from "@/lib/ai/generate"
 
 const FORMATS: ContentFormat[] = ["blog", "linkedin", "instagram"]
@@ -43,9 +44,15 @@ export async function POST(req: Request): Promise<Response> {
     throw e
   }
 
+  // Voz/tom/modelo do agente (aba "Agente") — o formato segue o escolhido aqui.
+  const cfg = await withTenant(sql, a.tenantId, (tx) => getEditorConfig(tx))
   let draft
   try {
-    draft = await generateDraft(prompt, format)
+    draft = await generateDraft(prompt, format, {
+      systemPrompt: cfg.system_prompt,
+      tone: cfg.tone,
+      model: cfg.model ?? undefined,
+    })
   } catch (e) {
     await refundGeneration(sql, a.tenantId) // não gerou: devolve a cota
     throw e

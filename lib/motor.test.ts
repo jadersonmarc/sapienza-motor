@@ -4,6 +4,7 @@ import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from 
 import { withTenant, schemaName, applyTenantMigrations } from "@/lib/platform/tenancy"
 import { tenantMigrations } from "@/lib/db/migrations"
 import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTitles, deleteItem, getItem } from "@/lib/content/store"
+import { getEditorConfig, upsertEditorConfig } from "@/lib/content/editor-config"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
 import { connectChannel, publishItem, ChannelLimitError, PartialPublishError, type Drivers } from "@/lib/channels/registry"
@@ -174,6 +175,28 @@ maybe("motor data plane", () => {
     expect(gone).toBeNull()
     const drafts = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM social_drafts WHERE content_item_id = ${item.id}`)) as unknown as { n: number }[]
     expect(drafts[0].n).toBe(0)
+  })
+
+  it("editor_config: defaults quando vazio; upsert persiste", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const def = await withTenant(sql, t, (tx) => getEditorConfig(tx))
+    expect(def).toEqual({ system_prompt: "", tone: "", themes: [], format: "blog", model: null, enabled: true })
+
+    await withTenant(sql, t, (tx) =>
+      upsertEditorConfig(tx, {
+        system_prompt: "voz da marca",
+        tone: "direto",
+        themes: ["automação", "crm"],
+        format: "linkedin",
+        model: "claude-sonnet-5",
+        enabled: false,
+      }),
+    )
+    const got = await withTenant(sql, t, (tx) => getEditorConfig(tx))
+    expect(got.system_prompt).toBe("voz da marca")
+    expect(got.themes).toEqual(["automação", "crm"])
+    expect(got.format).toBe("linkedin")
+    expect(got.enabled).toBe(false)
   })
 
   it("isolamento: conteúdo não vaza entre tenants", async () => {

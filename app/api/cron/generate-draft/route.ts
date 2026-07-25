@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db"
 import { activeTenants } from "@/lib/platform/gating"
 import { withTenant } from "@/lib/platform/tenancy"
 import { createItem, listItemTitles } from "@/lib/content/store"
+import { getEditorConfig } from "@/lib/content/editor-config"
 import { generateDraft, isAiConfigured } from "@/lib/ai/generate"
 import { slugify } from "@/lib/content/slug"
 import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib/content/quota"
@@ -34,6 +35,13 @@ export async function POST(req: Request): Promise<Response> {
 
   for (const tenantId of tenants) {
     try {
+      // Config do agente (aba "Agente"): voz/tom/temas/formato/modelo por tenant.
+      const cfg = await withTenant(sql, tenantId, (tx) => getEditorConfig(tx))
+      if (!cfg.enabled) {
+        skipped.push({ tenantId, reason: "automação desligada" })
+        continue
+      }
+
       // O cron consome a mesma cota do tenant. Sem cota não é erro: o tenant já
       // usou o que o plano dá no mês, então simplesmente não geramos para ele.
       try {
@@ -49,7 +57,13 @@ export async function POST(req: Request): Promise<Response> {
       const avoidTitles = await withTenant(sql, tenantId, (tx) => listItemTitles(tx))
       let draft
       try {
-        draft = await generateDraft(prompt, "blog", { avoidTitles, themeSeeds: body.themeSeeds })
+        draft = await generateDraft(prompt, cfg.format, {
+          avoidTitles,
+          themeSeeds: cfg.themes.length ? cfg.themes : body.themeSeeds,
+          systemPrompt: cfg.system_prompt,
+          tone: cfg.tone,
+          model: cfg.model ?? undefined,
+        })
       } catch (e) {
         await refundGeneration(sql, tenantId)
         throw e
@@ -62,6 +76,7 @@ export async function POST(req: Request): Promise<Response> {
           bodyMarkdown: draft.bodyMarkdown,
           excerpt: draft.excerpt,
           pilar,
+          format: cfg.format,
           seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
         }),
       )

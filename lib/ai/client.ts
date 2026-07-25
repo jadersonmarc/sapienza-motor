@@ -17,6 +17,7 @@ type StructuredOpts = {
   schema: Record<string, unknown>
   effort?: "low" | "medium" | "high"
   maxTokens?: number
+  model?: string // sobrescreve o modelo padrão do produto (config por tenant)
 }
 
 export async function callStructured<T>(opts: StructuredOpts): Promise<{ data: T; model: string }> {
@@ -24,7 +25,7 @@ export async function callStructured<T>(opts: StructuredOpts): Promise<{ data: T
   const client = new Anthropic()
 
   const response = await client.messages.create({
-    model: AI_MODEL,
+    model: opts.model || AI_MODEL,
     max_tokens: opts.maxTokens ?? 8000,
     thinking: { type: "adaptive" },
     output_config: {

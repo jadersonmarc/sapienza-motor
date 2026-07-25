@@ -59,17 +59,18 @@ const SOCIAL_SYSTEM: Record<"linkedin" | "instagram", string> = {
     "Praticamente sem emojis (no máximo 1). Sem clichês de IA.",
 }
 
-async function socialDraft(theme: string, platform: "linkedin" | "instagram"): Promise<Draft> {
+async function socialDraft(theme: string, platform: "linkedin" | "instagram", ctx?: DraftThemeContext): Promise<Draft> {
   const nTags = platform === "instagram" ? "8–12" : "3–5"
   const label = platform === "linkedin" ? "LinkedIn" : "Instagram"
   const user =
     `Crie um post de ${label} a partir do tema abaixo.\n\nTEMA: ${theme}\n\n` +
     `Requisitos: um título curto (uso interno); o texto do post pronto para publicar; ${nTags} hashtags relevantes (sem #).`
   const { data } = await callStructured<{ title: string; body: string; hashtags: string[] }>({
-    system: SOCIAL_SYSTEM[platform],
+    system: composeSystem(SOCIAL_SYSTEM[platform], ctx),
     user,
     schema: SOCIAL_SCHEMA,
     maxTokens: 4000,
+    model: ctx?.model,
   })
   const body = data.body.trim()
   const tags = (data.hashtags ?? []).map((h) => `#${h}`).join(" ")
@@ -82,9 +83,27 @@ async function socialDraft(theme: string, platform: "linkedin" | "instagram"): P
   }
 }
 
-// Renovação de tema (cron editorial): evita repetir o que já existe e semeia
-// ângulos novos. Adaptado de spa-sapienza/lib/ai/draft.themeGuidance.
-export type DraftThemeContext = { avoidTitles?: string[]; themeSeeds?: string[] }
+// Config de geração por tenant (aba "Agente"): personaliza voz/tom/modelo e os
+// temas, além do contexto de renovação (avoidTitles). Tudo opcional — sem config,
+// cai no comportamento base.
+export type DraftThemeContext = {
+  avoidTitles?: string[]
+  themeSeeds?: string[]
+  systemPrompt?: string
+  tone?: string
+  model?: string
+}
+
+// Compõe o system efetivo: guardrails base + voz da marca + tom do tenant. Os
+// guardrails (pt-BR, sem inventar, Sapienza Labs) ficam sempre; o tenant só soma.
+function composeSystem(base: string, ctx?: DraftThemeContext): string {
+  let s = base
+  const extra = (ctx?.systemPrompt ?? "").trim()
+  if (extra) s += `\n\nInstruções da marca:\n${extra}`
+  const tone = (ctx?.tone ?? "").trim()
+  if (tone) s += `\n\nTom desejado: ${tone}.`
+  return s
+}
 
 export function themeGuidance(ctx?: DraftThemeContext): string {
   const avoid = (ctx?.avoidTitles ?? []).filter(Boolean).slice(0, 40)
@@ -118,7 +137,7 @@ export async function generateDraft(
   }
 
   if (format === "linkedin" || format === "instagram") {
-    return socialDraft(theme, format)
+    return socialDraft(theme, format, ctx)
   }
 
   const user =
@@ -128,7 +147,13 @@ export async function generateDraft(
     "Inclua um CTA leve para falar com a Sapienza Labs no WhatsApp ao final." +
     themeGuidance(ctx)
 
-  const { data } = await callStructured<Draft>({ system: SYSTEM, user, schema: SCHEMA, maxTokens: 16000 })
+  const { data } = await callStructured<Draft>({
+    system: composeSystem(SYSTEM, ctx),
+    user,
+    schema: SCHEMA,
+    maxTokens: 16000,
+    model: ctx?.model,
+  })
   return {
     title: data.title.trim(),
     slug: slugify(data.slug || data.title),
