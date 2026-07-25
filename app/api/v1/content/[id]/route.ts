@@ -1,7 +1,7 @@
-import { authed, isResponse, json } from "@/lib/api/http"
+import { authed, isResponse, json, requireRole } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
-import { getItem, addRevision } from "@/lib/content/store"
+import { getItem, addRevision, deleteItem } from "@/lib/content/store"
 
 export const runtime = "nodejs"
 
@@ -51,4 +51,18 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   })
   if (!revId) return json(404, { error: "not found" })
   return json(200, { revision_id: revId })
+}
+
+// DELETE /api/v1/content/:id — exclui a peça (revisões/social/análises caem por
+// cascade). owner/admin. A imagem fica na biblioteca (gerenciável em /midia).
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+  const a = await authed(req)
+  if (isResponse(a)) return a
+  const denied = requireRole(a, ["owner", "admin"])
+  if (denied) return denied
+  const { id } = await ctx.params
+  const sql = getDb()
+  const deleted = await withTenant(sql, a.tenantId, (tx) => deleteItem(tx, id))
+  if (!deleted) return json(404, { error: "not found" })
+  return json(200, { ok: true })
 }

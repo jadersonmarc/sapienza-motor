@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
 import { withTenant, schemaName, applyTenantMigrations } from "@/lib/platform/tenancy"
 import { tenantMigrations } from "@/lib/db/migrations"
-import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTitles } from "@/lib/content/store"
+import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTitles, deleteItem, getItem } from "@/lib/content/store"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
 import { connectChannel, publishItem, ChannelLimitError, PartialPublishError, type Drivers } from "@/lib/channels/registry"
@@ -162,6 +162,18 @@ maybe("motor data plane", () => {
       await contentTransition(sql, t, item.id, "published")
     }
     expect(await usage(sql, t, "peca")).toBe(13) // 1 acima do incluso, faturado como excedente
+  })
+
+  it("excluir peça: some e leva revisões/social junto (cascade)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const item = await newItem(t, `del-${randomUUID()}`)
+    await withTenant(sql, t, (tx) => upsertSocialDraft(tx, { itemId: item.id, platform: "linkedin", body: "x", hashtags: [] }))
+    const deleted = await withTenant(sql, t, (tx) => deleteItem(tx, item.id))
+    expect(deleted).not.toBeNull()
+    const gone = await withTenant(sql, t, (tx) => getItem(tx, item.id))
+    expect(gone).toBeNull()
+    const drafts = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM social_drafts WHERE content_item_id = ${item.id}`)) as unknown as { n: number }[]
+    expect(drafts[0].n).toBe(0)
   })
 
   it("isolamento: conteúdo não vaza entre tenants", async () => {

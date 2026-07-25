@@ -25,6 +25,15 @@ export async function setItemImage(tx: Tx, id: string, imageUrl: string): Promis
   await tx`UPDATE content_items SET image_url = ${imageUrl}, updated_at = now() WHERE id = ${id}`
 }
 
+/** Exclui a peça (revisões/social_drafts/análises caem por ON DELETE CASCADE).
+ *  Devolve a image_url que estava salva, para o caller limpar o storage. */
+export async function deleteItem(tx: Tx, id: string): Promise<{ image_url: string | null } | null> {
+  const rows = (await tx`
+    DELETE FROM content_items WHERE id = ${id} RETURNING image_url
+  `) as unknown as { image_url: string | null }[]
+  return rows[0] ?? null
+}
+
 export type NewItem = {
   slug: string
   title: string
