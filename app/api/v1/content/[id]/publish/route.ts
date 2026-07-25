@@ -1,10 +1,11 @@
+import { after } from "next/server"
 import { authed, isResponse, json } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
 import { publishItem, PartialPublishError } from "@/lib/channels/registry"
-import { TransitionError } from "@/lib/content/state-machine"
 import { assertPublishAllowed, PublishCapError } from "@/lib/content/quota"
+import { setPublishError } from "@/lib/content/store"
 import { isImageConfigured } from "@/lib/brand/social-image"
 
 export const runtime = "nodejs"
@@ -29,9 +30,10 @@ async function coverInfo(sql: ReturnType<typeof getDb>, tenantId: string, id: st
   })
 }
 
-// POST /api/v1/content/:id/publish — publica nos canais habilitados + transição→published
-// (fatura 1 peça na 1ª vez). Aprovação manual antecipa a janela de 48h. Gera a imagem
-// on-brand (Satori) e sobe no R2 quando o storage está configurado (URL pública p/ IG).
+// POST /api/v1/content/:id/publish — publica em SEGUNDO PLANO e retorna na hora
+// (202). O post nos canais (incl. upload de imagem no LinkedIn) roda via after(),
+// sem estourar o proxy. Falha no background fica em content_items.publish_error
+// (o console mostra); sucesso limpa. A checagem de cota (409) é síncrona.
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   const a = await authed(req)
   if (isResponse(a)) return a
@@ -39,8 +41,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const sql = getDb()
   if (!(await canOperate(sql, a.tenantId))) return json(403, { error: "subscription not active" })
 
-  // Antes de renderizar a capa e subir no R2: se o cap barra, esse trabalho seria
-  // jogado fora. O publishItem checa de novo (protege também o cron).
+  // Cota: barra AQUI (síncrono) — não faz sentido iniciar a publicação se o cap
+  // não permite. O publishItem checa de novo.
   try {
     await assertPublishAllowed(sql, a.tenantId)
   } catch (e) {
@@ -50,31 +52,23 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const body = (await req.json().catch(() => ({}))) as { imageUrl?: string }
   let imageUrl = body.imageUrl
-
-  // Imagem: usa a que já está salva na peça (gerada na criação/editor) — SEM
-  // renderizar Satori aqui. Renderizar no publish deixava a requisição pesada e
-  // estourava o proxy (503). A imagem já nasce na criação e fica na biblioteca.
   if (!imageUrl && isImageConfigured()) {
     const info = await coverInfo(sql, a.tenantId, id)
-    if (info && info.published_at == null && info.image_url) {
-      imageUrl = info.image_url
-    }
+    if (info && info.published_at == null && info.image_url) imageUrl = info.image_url
   }
 
-  try {
-    const results = await publishItem(sql, a.tenantId, id, undefined, imageUrl)
-    return json(200, { published: results, failures: [] })
-  } catch (e) {
-    if (e instanceof TransitionError) return json(409, { error: e.message })
-    if (e instanceof PublishCapError) return json(409, { error: e.message })
-    if (e instanceof PartialPublishError) {
-      // Publicou em algum canal: a peça está no ar e já foi faturada, então 5xx
-      // enganaria o cliente. Devolve o que saiu e o que falhou — os canais que
-      // falharam não são retentados; precisam de ação humana.
-      if (e.published.length > 0) return json(200, { published: e.published, failures: e.failures })
-      // Nada saiu: falha de upstream de verdade. Não faturou; o cron vai retentar.
-      return json(502, { error: e.message, published: [], failures: e.failures })
+  // Publica em segundo plano: a request retorna já; o post acontece logo depois.
+  after(async () => {
+    try {
+      await publishItem(sql, a.tenantId, id, undefined, imageUrl)
+      await withTenant(sql, a.tenantId, (tx) => setPublishError(tx, id, null))
+    } catch (e) {
+      const msg =
+        e instanceof PartialPublishError ? e.message : e instanceof Error ? e.message : String(e)
+      console.error(`[publish] falha em background (peça ${id}):`, msg)
+      await withTenant(sql, a.tenantId, (tx) => setPublishError(tx, id, msg)).catch(() => {})
     }
-    throw e
-  }
+  })
+
+  return json(202, { async: true })
 }

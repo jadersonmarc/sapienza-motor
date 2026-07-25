@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto"
 import { marked } from "marked"
 import type { Channel, Platform, PublishInput } from "./types"
+import { readImageBytes } from "@/lib/storage/s3"
 
 // Corta o texto ao limite da rede (com reticências), evitando 400 por tamanho.
 function cap(text: string, max: number): string {
@@ -184,6 +185,54 @@ async function resolveLinkedinAuthor(accessToken: string): Promise<string> {
   throw new Error("linkedin: não foi possível resolver o autor pelo token (precisa do escopo openid/profile)")
 }
 
+// Sobe a imagem on-brand pro LinkedIn (initializeUpload no /rest/images → PUT dos
+// bytes lidos direto do storage) e devolve o URN da mídia. Best-effort: qualquer
+// falha → null (post sai só com texto). Roda no publish em segundo plano, então
+// os segundos do upload não estouram o proxy. Loga o motivo ([linkedin-image]).
+async function uploadLinkedinImage(accessToken: string, authorUrn: string, imageUrl: string): Promise<string | null> {
+  try {
+    const init = await fetch("https://api.linkedin.com/rest/images?action=initializeUpload", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
+      signal: AbortSignal.timeout(LI_TIMEOUT),
+    })
+    if (!init.ok) {
+      console.error(`[linkedin-image] initializeUpload ${init.status}: ${await init.text().catch(() => "")}`)
+      return null
+    }
+    const { value } = (await init.json()) as { value?: { uploadUrl?: string; image?: string } }
+    if (!value?.uploadUrl || !value?.image) {
+      console.error("[linkedin-image] initializeUpload sem uploadUrl/image")
+      return null
+    }
+    const bytes = await readImageBytes(imageUrl)
+    if (!bytes) {
+      console.error(`[linkedin-image] sem bytes da imagem (${imageUrl})`)
+      return null
+    }
+    const up = await fetch(value.uploadUrl, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "image/png" },
+      body: bytes,
+      signal: AbortSignal.timeout(LI_TIMEOUT),
+    })
+    if (!up.ok) {
+      console.error(`[linkedin-image] PUT ${up.status}: ${await up.text().catch(() => "")}`)
+      return null
+    }
+    return value.image
+  } catch (e) {
+    console.error("[linkedin-image] exceção:", e)
+    return null
+  }
+}
+
 export class LinkedinChannel implements Channel {
   readonly platform: Platform = "linkedin"
   async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
@@ -202,9 +251,8 @@ export class LinkedinChannel implements Channel {
     if (!accessToken) throw new Error("linkedin: access_token ausente")
     if (!authorUrn) authorUrn = await resolveLinkedinAuthor(accessToken)
 
-    // Post de TEXTO (rápido). O anexo de imagem pesava o publish (4 idas ao
-    // LinkedIn) e estourava o timeout do proxy → 503. A imagem volta depois,
-    // fora do caminho quente. A capa on-brand segue na biblioteca/editor.
+    // Anexa a imagem on-brand quando houver (best-effort — se falhar, sai texto).
+    const imageUrn = input.imageUrl ? await uploadLinkedinImage(accessToken, authorUrn, input.imageUrl) : null
 
     // API atual (Posts API); a /v2/ugcPosts é legada.
     const res = await fetch("https://api.linkedin.com/rest/posts", {
@@ -224,6 +272,7 @@ export class LinkedinChannel implements Channel {
           targetEntities: [],
           thirdPartyDistributionChannels: [],
         },
+        ...(imageUrn ? { content: { media: { id: imageUrn, title: cap(input.title, 400) } } } : {}),
         lifecycleState: "PUBLISHED",
         isReshareDisabledByAuthor: false,
       }),

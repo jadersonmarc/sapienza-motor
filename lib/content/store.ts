@@ -16,8 +16,15 @@ export type ContentItem = {
   published_at: string | null
   regen_count: number
   image_url: string | null
+  publish_error: string | null
   /** título da revisão atual (presente em listItems; ausente em getItem). */
   title?: string | null
+}
+
+/** Registra (ou limpa, com null) o erro da última tentativa de publicação em
+ *  segundo plano — o console mostra na peça. */
+export async function setPublishError(tx: Tx, id: string, error: string | null): Promise<void> {
+  await tx`UPDATE content_items SET publish_error = ${error} WHERE id = ${id}`
 }
 
 /** Grava a imagem on-brand escolhida da peça (gerada ou trocada pela biblioteca). */
