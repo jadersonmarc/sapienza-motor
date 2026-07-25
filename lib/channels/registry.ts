@@ -40,6 +40,15 @@ const PLATFORMS_FOR_FORMAT: Record<string, Platform[]> = {
   instagram: ["instagram"],
 }
 
+/** Formatos cujo canal está conectado no tenant (ordem: blog, linkedin, instagram).
+ *  Orienta a automação: sem isto ela criaria "blog" mesmo sem canal de blog. */
+export async function connectedFormats(sql: Sql, tenantId: string): Promise<("blog" | "linkedin" | "instagram")[]> {
+  const enabled = new Set((await enabledChannels(sql, tenantId)).map((c) => c.platform))
+  return (["blog", "linkedin", "instagram"] as const).filter((f) =>
+    PLATFORMS_FOR_FORMAT[f].some((p) => enabled.has(p)),
+  )
+}
+
 export class ChannelLimitError extends Error {}
 
 /**
