@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto"
 import { marked } from "marked"
 import type { Channel, Platform, PublishInput } from "./types"
+import { readImageBytes } from "@/lib/storage/s3"
 
 // Impls concretas. Blog é canal interno (sem credencial). Instagram e LinkedIn
 // falam com as APIs oficiais (adaptado de spa-sapienza/lib/social/*); só rodam em
@@ -176,6 +177,60 @@ async function resolveLinkedinAuthor(accessToken: string): Promise<string> {
   throw new Error("linkedin: não foi possível resolver o autor pelo token (precisa do escopo openid/profile)")
 }
 
+// Sobe a imagem on-brand pro LinkedIn (initializeUpload → PUT dos bytes lidos
+// direto do storage) e devolve o URN. Best-effort: qualquer falha → null (post
+// sai só com texto). Loga o motivo real ([linkedin-image]).
+async function uploadLinkedinImage(accessToken: string, authorUrn: string, imageUrl: string): Promise<string | null> {
+  try {
+    const init = await fetch("https://api.linkedin.com/rest/images?action=initializeUpload", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
+      signal: AbortSignal.timeout(LI_TIMEOUT),
+    })
+    if (!init.ok) {
+      console.error(`[linkedin-image] initializeUpload ${init.status}: ${await init.text().catch(() => "")}`)
+      return null
+    }
+    const { value } = (await init.json()) as { value?: { uploadUrl?: string; image?: string } }
+    if (!value?.uploadUrl || !value?.image) {
+      console.error("[linkedin-image] initializeUpload sem uploadUrl/image")
+      return null
+    }
+    const bytes = await readImageBytes(imageUrl)
+    if (!bytes) {
+      console.error(`[linkedin-image] sem bytes da imagem (${imageUrl})`)
+      return null
+    }
+    const up = await fetch(value.uploadUrl, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "image/png" },
+      body: bytes,
+      signal: AbortSignal.timeout(LI_TIMEOUT),
+    })
+    if (!up.ok) {
+      console.error(`[linkedin-image] PUT ${up.status}: ${await up.text().catch(() => "")}`)
+      return null
+    }
+    return value.image
+  } catch (e) {
+    console.error("[linkedin-image] exceção:", e)
+    return null
+  }
+}
+
+// Orçamento total do anexo de imagem: se não ficar pronto a tempo, o post sai só
+// com texto (não segura o publish → evita o proxy cortar com 503).
+const LI_IMAGE_BUDGET = 6000
+function withImageBudget(p: Promise<string | null>): Promise<string | null> {
+  return Promise.race([p, new Promise<string | null>((r) => setTimeout(() => r(null), LI_IMAGE_BUDGET))])
+}
+
 export class LinkedinChannel implements Channel {
   readonly platform: Platform = "linkedin"
   async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
@@ -194,9 +249,11 @@ export class LinkedinChannel implements Channel {
     if (!accessToken) throw new Error("linkedin: access_token ausente")
     if (!authorUrn) authorUrn = await resolveLinkedinAuthor(accessToken)
 
-    // Post de TEXTO (rápido). O anexo de imagem pesava o publish (4 idas ao
-    // LinkedIn) e estourava o timeout do proxy → 503. A imagem volta depois,
-    // fora do caminho quente. A capa on-brand segue na biblioteca/editor.
+    // Anexa a imagem se ficar pronta dentro do orçamento; senão posta só texto
+    // (nunca segura o publish até o 503).
+    const imageUrn = input.imageUrl
+      ? await withImageBudget(uploadLinkedinImage(accessToken, authorUrn, input.imageUrl))
+      : null
 
     // API atual (Posts API); a /v2/ugcPosts é legada.
     const res = await fetch("https://api.linkedin.com/rest/posts", {
@@ -216,6 +273,7 @@ export class LinkedinChannel implements Channel {
           targetEntities: [],
           thirdPartyDistributionChannels: [],
         },
+        ...(imageUrn ? { content: { media: { id: imageUrn, title: input.title } } } : {}),
         lifecycleState: "PUBLISHED",
         isReshareDisabledByAuthor: false,
       }),
