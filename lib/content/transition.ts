@@ -2,6 +2,7 @@ import type { Sql } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { productRules } from "@/lib/platform/gating"
 import { emitUsageRecorded } from "@/lib/platform/events"
+import { currentPeriod } from "@/lib/platform/period"
 import { canTransition, TransitionError, type ContentStatus } from "./state-machine"
 import { getItem, insertAudit } from "./store"
 
@@ -46,7 +47,7 @@ export async function contentTransition(
       const firstPublish = item.published_at == null
       await tx`UPDATE content_items SET status='published', published_at=COALESCE(published_at, now()), updated_at=now() WHERE id=${itemId}`
       if (firstPublish) {
-        const period = new Date().toISOString().slice(0, 7)
+        const period = currentPeriod()
         await emitUsageRecorded(tx, { tenantId, metric: "peca", count: 1, period })
       }
     } else if (to === "draft") {

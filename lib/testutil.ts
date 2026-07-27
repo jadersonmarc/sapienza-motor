@@ -1,6 +1,7 @@
 import postgres from "postgres"
 import { randomUUID } from "node:crypto"
 import { applyTenantMigrations, schemaName } from "@/lib/platform/tenancy"
+import { currentPeriod } from "@/lib/platform/period"
 import { tenantMigrations } from "@/lib/db/migrations"
 import type { Sql } from "@/lib/db"
 
@@ -94,7 +95,7 @@ export async function dropTenants(sql: Sql): Promise<void> {
 
 /** Uso agregado (usage_counters) de uma métrica no período corrente. */
 export async function usage(sql: Sql, tenantId: string, metric: string): Promise<number> {
-  const period = new Date().toISOString().slice(0, 7)
+  const period = currentPeriod()
   const rows = (await sql`
     SELECT count FROM public.usage_counters
     WHERE tenant_id = ${tenantId}::uuid AND produto = 'motor' AND period = ${period} AND metric = ${metric}

@@ -1,6 +1,7 @@
 import type { Sql } from "@/lib/db"
 import { PRODUTO, tierOf, tenantAccess } from "@/lib/platform/gating"
 import { emitUsageRecorded } from "@/lib/platform/events"
+import { currentPeriod } from "@/lib/platform/period"
 
 // Teto de CUSTO do produto. `plans.incluso` protegia só a receita: faturamos por
 // peça publicada, mas gerar era ilimitado — um tenant podia queimar centenas de
@@ -20,10 +21,9 @@ export const METRIC_PECA = "peca"
 export class GenerationQuotaError extends Error {}
 export class PublishCapError extends Error {}
 
-/** Período corrente "YYYY-MM" — mesma convenção do billing e do trigger. */
-export function currentPeriod(at = new Date()): string {
-  return at.toISOString().slice(0, 7)
-}
+// currentPeriod (BRT) vem de @/lib/platform/period — reexportado por compat com
+// quem já importava daqui.
+export { currentPeriod }
 
 /** Incluído no tier ativo (public.plans.incluso). 0 se não assina/ativo. */
 export async function planIncluso(sql: Sql, tenantId: string): Promise<number> {
