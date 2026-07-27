@@ -48,8 +48,8 @@ maybe("motor data plane", () => {
     await sql.end()
   })
 
-  const newItem = (tenantId: string, slug: string) =>
-    withTenant(sql, tenantId, (tx) => createItem(tx, { slug, title: "T", bodyMarkdown: "corpo" }))
+  const newItem = (tenantId: string, slug: string, format?: string) =>
+    withTenant(sql, tenantId, (tx) => createItem(tx, { slug, title: "T", bodyMarkdown: "corpo", format }))
 
   // Regressão de produção: Margot e Motor coabitam o mesmo tenant_<id>. Quando a
   // Margot provisiona primeiro, ela cria schema_migrations do kit (version bigint
@@ -341,7 +341,9 @@ maybe("motor data plane", () => {
 
   it("social: publish prefere a legenda social gerada (body + hashtags) ao markdown", async () => {
     const t = await provisionTenant(sql, "pro")
-    const item = await newItem(t, "social-pub")
+    // Peça de formato instagram: publishItem só publica nos canais do formato, e a
+    // legenda social do IG só é preferida quando a peça de fato vai ao Instagram.
+    const item = await newItem(t, "social-pub", "instagram")
     await connectChannel(sql, t, "instagram")
     await withTenant(sql, t, (tx) =>
       upsertSocialDraft(tx, { itemId: item.id, platform: "instagram", body: "LEGENDA IG", hashtags: ["pme", "crm"] }),
