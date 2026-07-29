@@ -1,0 +1,17 @@
+name: Cron · renderizar motion
+
+# Aciona o serviço de render: peças de motion com render_status='queued' são
+# renderizadas (MP4), sobem ao R2 e entram em aprovação. A cada 5 min.
+# Secrets: MOTION_URL (URL pública do serviço de render), WEBHOOK_SECRET.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.MOTION_URL }}/trigger" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"

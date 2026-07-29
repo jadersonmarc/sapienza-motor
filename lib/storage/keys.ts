@@ -3,10 +3,11 @@
 // mão; tudo passa por aqui. Convenção forward: chaves antigas continuam válidas.
 import type { FormatId } from "@/lib/brand/formats"
 
-export type R2Purpose = "article" | "instagram" | "linkedin" | "editor" | "page" | "geral"
+export type R2Purpose = "article" | "instagram" | "linkedin" | "editor" | "page" | "geral" | "motion"
 
 // Prefixo (pasta) por finalidade. `social/<plataforma>` agrupa as imagens sociais;
-// `geral` é a pasta-curinga da biblioteca para o que não se encaixa nas demais.
+// `geral` é a pasta-curinga da biblioteca para o que não se encaixa nas demais;
+// `motion` guarda os MP4 das peças em movimento (servidos pelo proxy de mídia).
 const PREFIX: Record<R2Purpose, string> = {
   article: "articles",
   instagram: "social/instagram",
@@ -14,6 +15,7 @@ const PREFIX: Record<R2Purpose, string> = {
   editor: "editor",
   page: "pages",
   geral: "geral",
+  motion: "motion",
 }
 
 /** Todas as finalidades navegáveis na biblioteca de mídia (ordem de exibição). */
@@ -24,6 +26,7 @@ export const R2_PURPOSES: readonly R2Purpose[] = [
   "page",
   "editor",
   "geral",
+  "motion",
 ]
 
 export function isR2Purpose(v: string): v is R2Purpose {
@@ -69,6 +72,11 @@ export function brandImageKey(opts: {
 /** Chave de upload genérico da biblioteca para uma finalidade: `<pasta>/<uuid>.<ext>`. */
 export function mediaUploadKey(opts: { purpose: R2Purpose; uuid: string; ext: string }): string {
   return `${PREFIX[opts.purpose]}/${opts.uuid}.${opts.ext}`
+}
+
+/** Chave do MP4 de uma peça de motion: `motion/<slug>__<aspect>.mp4`. */
+export function motionVideoKey(opts: { slug: string; aspect: string }): string {
+  return `${PREFIX.motion}/${opts.slug}__${opts.aspect}.mp4`
 }
 
 /** Chave de imagem social enviada/trocada pelo operador: `social/<plataforma>/<uuid>.<ext>`. */

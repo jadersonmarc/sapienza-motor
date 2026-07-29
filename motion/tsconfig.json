@@ -10,7 +10,19 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../*"]
+    }
   },
-  "include": ["src", "scripts", "remotion.config.ts", "../lib/content/motion-types.ts", "../lib/brand/tokens.ts"]
+  "include": [
+    "src",
+    "scripts/copy-assets.ts",
+    "scripts/sample.ts",
+    "scripts/still.ts",
+    "remotion.config.ts",
+    "../lib/content/motion-types.ts",
+    "../lib/brand/tokens.ts"
+  ]
 }
