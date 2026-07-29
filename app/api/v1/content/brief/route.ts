@@ -1,8 +1,8 @@
-import { authed, isResponse, json } from "@/lib/api/http"
+import { authed, isResponse, json, runAfterResponse } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
-import { createItem } from "@/lib/content/store"
+import { createGeneratingItem, addRevision, finishGenerating } from "@/lib/content/store"
 import { generatePieceImage } from "@/lib/content/piece-image"
 import { generateFromBrief } from "@/lib/ai/brief"
 import { slugify } from "@/lib/content/slug"
@@ -28,7 +28,7 @@ export async function POST(req: Request): Promise<Response> {
   const objetivo = (body.objetivo ?? "").trim()
   if (!objetivo) return json(400, { error: "objetivo obrigatório" })
 
-  // Debita a cota antes de chamar o modelo — é a chamada que custa.
+  // Debita a cota antes de agendar o modelo — é a chamada que custa (refund na falha).
   try {
     await reserveGeneration(sql, a.tenantId)
   } catch (e) {
@@ -36,34 +36,44 @@ export async function POST(req: Request): Promise<Response> {
     throw e
   }
 
-  let draft
-  try {
-    draft = await generateFromBrief({
-      objetivo,
-      pontosChave: body.pontosChave,
-      publico: body.publico,
-      tom: body.tom,
-      pilar: body.pilar ?? null,
-    })
-  } catch (e) {
-    await refundGeneration(sql, a.tenantId) // não gerou: devolve a cota
-    throw e
-  }
-
-  const slug = `${draft.slug || slugify(objetivo) || "rascunho"}-${Date.now().toString(36)}`
+  // Cria já (generating) e gera o rascunho em segundo plano (after()) — igual ao
+  // POST /content: imune a corte de proxy; falha vai p/ generate_error + refund.
+  const pilar = body.pilar ?? null
+  const slug = `${slugify(objetivo) || "rascunho"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
-    createItem(tx, {
-      slug,
-      title: draft.title,
-      bodyMarkdown: draft.bodyMarkdown,
-      excerpt: draft.excerpt,
-      pilar: body.pilar ?? null,
-      seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
-      authorId: a.userId,
-    }),
+    createGeneratingItem(tx, { slug, pilar, authorId: a.userId }),
   )
-  await generatePieceImage(sql, a.tenantId, item.id).catch((e) =>
-    console.error("[piece-image] falha ao gerar no brief:", e),
-  )
-  return json(201, { id: item.id, slug })
+
+  await runAfterResponse(async () => {
+    try {
+      const draft = await generateFromBrief({
+        objetivo,
+        pontosChave: body.pontosChave,
+        publico: body.publico,
+        tom: body.tom,
+        pilar,
+      })
+      await withTenant(sql, a.tenantId, (tx) =>
+        addRevision(tx, item.id, {
+          title: draft.title,
+          bodyMarkdown: draft.bodyMarkdown,
+          excerpt: draft.excerpt,
+          ai: false,
+          authorId: a.userId,
+          seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
+        }),
+      )
+      await withTenant(sql, a.tenantId, (tx) => finishGenerating(tx, item.id, null))
+      await generatePieceImage(sql, a.tenantId, item.id).catch((e) =>
+        console.error("[piece-image] falha ao gerar no brief:", e),
+      )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error(`[generate-brief] falha em background (peça ${item.id}):`, msg)
+      await refundGeneration(sql, a.tenantId).catch(() => {})
+      await withTenant(sql, a.tenantId, (tx) => finishGenerating(tx, item.id, msg)).catch(() => {})
+    }
+  })
+
+  return json(202, { id: item.id, slug, async: true })
 }

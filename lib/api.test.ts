@@ -154,8 +154,9 @@ maybe("motor API", () => {
     const tok = await token(t)
     const { POST } = await import("@/app/api/v1/content/route")
     for (let i = 0; i < 12; i++) {
+      // Geração roda em background: a criação responde 202 (a cota é debitada síncrono).
       const ok = await POST(req("POST", "/api/v1/content", tok, { prompt: `tema ${i}` }))
-      expect(ok.status).toBe(201)
+      expect(ok.status).toBe(202)
     }
     const blocked = await POST(req("POST", "/api/v1/content", tok, { prompt: "mais um" }))
     expect(blocked.status).toBe(409)
@@ -180,13 +181,16 @@ maybe("motor API", () => {
     const tok = await token(t)
     const { POST } = await import("@/app/api/v1/content/route")
     const res = await POST(req("POST", "/api/v1/content", tok, { prompt: "tema de teste", format: "linkedin" }))
-    expect(res.status).toBe(201)
+    expect(res.status).toBe(202) // criada já; rascunho gerado em background
     const { id } = (await res.json()) as { id: string }
 
     const { GET } = await import("@/app/api/v1/content/[id]/route")
     const got = await GET(req("GET", `/api/v1/content/${id}`, tok), { params: Promise.resolve({ id }) })
-    const detail = (await got.json()) as { format: string }
+    const detail = (await got.json()) as { format: string; generating: boolean; revision: unknown }
     expect(detail.format).toBe("linkedin")
+    // fora de request scope o rascunho é gerado inline → termina generating=false com revisão
+    expect(detail.generating).toBe(false)
+    expect(detail.revision).not.toBeNull()
   })
 
   it("PUT /content/:id edita → nova revisão atual", async () => {
@@ -255,7 +259,7 @@ maybe("motor API", () => {
     const tok = await token(t)
     const create = await import("@/app/api/v1/content/route")
     const post = await create.POST(req("POST", "/api/v1/content", tok, { prompt: "meu tema" }))
-    expect(post.status).toBe(201)
+    expect(post.status).toBe(202)
     const { id } = (await post.json()) as { id: string }
 
     const { POST: transition } = await import("@/app/api/v1/content/[id]/transition/route")

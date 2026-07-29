@@ -1,8 +1,8 @@
-import { authed, isResponse, json } from "@/lib/api/http"
+import { authed, isResponse, json, runAfterResponse } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
-import { createItem, listItems } from "@/lib/content/store"
+import { createGeneratingItem, addRevision, finishGenerating, listItems } from "@/lib/content/store"
 import { generatePieceImage } from "@/lib/content/piece-image"
 import { getEditorConfig } from "@/lib/content/editor-config"
 import { generateDraft, type ContentFormat } from "@/lib/ai/generate"
@@ -22,7 +22,10 @@ export async function GET(req: Request): Promise<Response> {
   return json(200, { items })
 }
 
-// POST /api/v1/content — cria uma peça a partir de um tema (gera rascunho via IA/seam).
+// POST /api/v1/content — cria uma peça a partir de um tema. A peça é criada JÁ
+// (generating=true) e retorna na hora (202); o rascunho é escrito em SEGUNDO PLANO
+// (after()), imune a corte de proxy (ex.: limite de ~100s do Cloudflare). Falha no
+// background fica em content_items.generate_error (o console mostra) e devolve a cota.
 export async function POST(req: Request): Promise<Response> {
   const a = await authed(req)
   if (isResponse(a)) return a
@@ -36,7 +39,7 @@ export async function POST(req: Request): Promise<Response> {
     ? (body.format as ContentFormat)
     : "blog"
 
-  // Debita a cota antes de chamar o modelo — é a chamada que custa.
+  // Debita a cota antes de agendar o modelo — é a chamada que custa (refund na falha).
   try {
     await reserveGeneration(sql, a.tenantId)
   } catch (e) {
@@ -46,33 +49,40 @@ export async function POST(req: Request): Promise<Response> {
 
   // Voz/tom/modelo do agente (aba "Agente") — o formato segue o escolhido aqui.
   const cfg = await withTenant(sql, a.tenantId, (tx) => getEditorConfig(tx))
-  let draft
-  try {
-    draft = await generateDraft(prompt, format, {
-      systemPrompt: cfg.system_prompt,
-      tone: cfg.tone,
-      model: cfg.model ?? undefined,
-    })
-  } catch (e) {
-    await refundGeneration(sql, a.tenantId) // não gerou: devolve a cota
-    throw e
-  }
-
-  const slug = `${draft.slug || slugify(prompt)}-${Date.now().toString(36)}`
+  const slug = `${slugify(prompt) || "rascunho"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
-    createItem(tx, {
-      slug,
-      title: draft.title,
-      bodyMarkdown: draft.bodyMarkdown,
-      excerpt: draft.excerpt,
-      format,
-      seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
-      authorId: a.userId,
-    }),
+    createGeneratingItem(tx, { slug, format, authorId: a.userId }),
   )
-  // A imagem on-brand nasce junto com a descrição (best-effort — sem storage, pula).
-  await generatePieceImage(sql, a.tenantId, item.id).catch((e) =>
-    console.error("[piece-image] falha ao gerar na criação:", e),
-  )
-  return json(201, { id: item.id, slug })
+
+  await runAfterResponse(async () => {
+    try {
+      const draft = await generateDraft(prompt, format, {
+        systemPrompt: cfg.system_prompt,
+        tone: cfg.tone,
+        model: cfg.model ?? undefined,
+      })
+      await withTenant(sql, a.tenantId, (tx) =>
+        addRevision(tx, item.id, {
+          title: draft.title,
+          bodyMarkdown: draft.bodyMarkdown,
+          excerpt: draft.excerpt,
+          ai: false, // 1º rascunho não conta como regeneração
+          authorId: a.userId,
+          seo: draft.keywords.length ? { keywords: draft.keywords } : undefined,
+        }),
+      )
+      await withTenant(sql, a.tenantId, (tx) => finishGenerating(tx, item.id, null))
+      // A imagem on-brand nasce junto com a descrição (best-effort — sem storage, pula).
+      await generatePieceImage(sql, a.tenantId, item.id).catch((e) =>
+        console.error("[piece-image] falha ao gerar na criação:", e),
+      )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error(`[generate] falha em background (peça ${item.id}):`, msg)
+      await refundGeneration(sql, a.tenantId).catch(() => {}) // não gerou: devolve a cota
+      await withTenant(sql, a.tenantId, (tx) => finishGenerating(tx, item.id, msg)).catch(() => {})
+    }
+  })
+
+  return json(202, { id: item.id, slug, async: true })
 }

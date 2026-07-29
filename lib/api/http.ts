@@ -1,3 +1,4 @@
+import { after } from "next/server"
 import { verifyProductToken, bearer } from "@/lib/platform/authclient"
 import { PRODUTO } from "@/lib/platform/gating"
 
@@ -8,6 +9,18 @@ export function json(status: number, body: unknown): Response {
     status,
     headers: { "content-type": "application/json" },
   })
+}
+
+/** Agenda trabalho para DEPOIS da resposta (não segura a request — imune a corte
+ *  de proxy). Em produção usa next/server `after`; fora de um request scope
+ *  (testes/scripts) `after` lança — aí roda inline (await) para o efeito acontecer
+ *  mesmo assim. */
+export async function runAfterResponse(work: () => Promise<void>): Promise<void> {
+  try {
+    after(work)
+  } catch {
+    await work()
+  }
 }
 
 export type Authed = { tenantId: string; userId: string; role: string }

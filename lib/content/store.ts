@@ -17,8 +17,36 @@ export type ContentItem = {
   regen_count: number
   image_url: string | null
   publish_error: string | null
+  /** true enquanto a IA escreve o rascunho em segundo plano (after()). */
+  generating: boolean
+  /** motivo da última falha de geração em background (o console mostra); null = ok. */
+  generate_error: string | null
   /** título da revisão atual (presente em listItems; ausente em getItem). */
   title?: string | null
+}
+
+/** Cria a peça JÁ marcada como generating (sem revisão ainda) e devolve o id —
+ *  o rascunho é escrito depois, em segundo plano (after()). */
+export async function createGeneratingItem(
+  tx: Tx,
+  input: { slug: string; format?: string; pilar?: string | null; authorId?: string | null },
+): Promise<{ id: string }> {
+  const [item] = (await tx`
+    INSERT INTO content_items (slug, pilar, format, author_id, generating)
+    VALUES (${input.slug}, ${input.pilar ?? null}, ${input.format ?? "blog"}, ${input.authorId ?? null}, true)
+    RETURNING id
+  `) as unknown as { id: string }[]
+  return item
+}
+
+/** Marca a peça como generating (regeneração em background) e limpa erro anterior. */
+export async function markGenerating(tx: Tx, id: string): Promise<void> {
+  await tx`UPDATE content_items SET generating = true, generate_error = null, updated_at = now() WHERE id = ${id}`
+}
+
+/** Encerra a geração em background: generating=false + grava (ou limpa) o erro. */
+export async function finishGenerating(tx: Tx, id: string, error: string | null): Promise<void> {
+  await tx`UPDATE content_items SET generating = false, generate_error = ${error}, updated_at = now() WHERE id = ${id}`
 }
 
 /** Registra (ou limpa, com null) o erro da última tentativa de publicação em
@@ -162,11 +190,19 @@ export async function listAnalyses(tx: Tx, itemId: string): Promise<Analysis[]> 
 export async function addRevision(
   tx: Tx,
   itemId: string,
-  input: { title: string; bodyMarkdown: string; excerpt?: string; ai: boolean; authorId?: string | null },
+  input: {
+    title: string
+    bodyMarkdown: string
+    excerpt?: string
+    ai: boolean
+    authorId?: string | null
+    /** SEO (ex.: { keywords: string[] }) — persistido no jsonb da revisão. */
+    seo?: Record<string, unknown>
+  },
 ): Promise<string> {
   const [rev] = (await tx`
-    INSERT INTO content_revisions (content_item_id, title, body_markdown, excerpt, ai_generated, author_id)
-    VALUES (${itemId}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, ${input.ai}, ${input.authorId ?? null})
+    INSERT INTO content_revisions (content_item_id, title, body_markdown, excerpt, seo, ai_generated, author_id)
+    VALUES (${itemId}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, ${tx.json((input.seo ?? {}) as Json)}, ${input.ai}, ${input.authorId ?? null})
     RETURNING id
   `) as unknown as { id: string }[]
   await tx`
