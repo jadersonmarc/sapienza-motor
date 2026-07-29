@@ -21,6 +21,14 @@ export type ContentItem = {
   generating: boolean
   /** motivo da última falha de geração em background (o console mostra); null = ok. */
   generate_error: string | null
+  // Motion (peça em movimento). is_motion marca a peça; render_* é o estado do
+  // serviço de render; video_url é o MP4 pronto (R2).
+  is_motion: boolean
+  motion_preset: string | null
+  motion_aspect: string | null
+  video_url: string | null
+  render_status: string | null
+  render_error: string | null
   /** título da revisão atual (presente em listItems; ausente em getItem). */
   title?: string | null
 }
@@ -47,6 +55,80 @@ export async function markGenerating(tx: Tx, id: string): Promise<void> {
 /** Encerra a geração em background: generating=false + grava (ou limpa) o erro. */
 export async function finishGenerating(tx: Tx, id: string, error: string | null): Promise<void> {
   await tx`UPDATE content_items SET generating = false, generate_error = ${error}, updated_at = now() WHERE id = ${id}`
+}
+
+// ── Motion (peça em movimento) ────────────────────────────────────────────────
+
+/** Cria a peça de motion JÁ marcada (is_motion, generating, render_status=queued),
+ *  sem revisão — o conteúdo do preset é gerado depois em background (after()) e o
+ *  MP4 é renderizado pelo serviço de render, que escreve video_url + render_status. */
+export async function createMotionItem(
+  tx: Tx,
+  input: { slug: string; format?: string; authorId?: string | null },
+): Promise<{ id: string }> {
+  const [item] = (await tx`
+    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status)
+    VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, true, 'queued')
+    RETURNING id
+  `) as unknown as { id: string }[]
+  return item
+}
+
+/** Grava o preset escolhido pela geração e o aspecto da peça de motion. */
+export async function setMotionMeta(
+  tx: Tx,
+  id: string,
+  meta: { preset: string; aspect: string },
+): Promise<void> {
+  await tx`
+    UPDATE content_items
+       SET motion_preset = ${meta.preset}, motion_aspect = ${meta.aspect}, updated_at = now()
+     WHERE id = ${id}
+  `
+}
+
+/** Grava o MP4 renderizado (R2) na peça — escrito pelo serviço de render. */
+export async function setItemVideo(tx: Tx, id: string, videoUrl: string): Promise<void> {
+  await tx`UPDATE content_items SET video_url = ${videoUrl}, updated_at = now() WHERE id = ${id}`
+}
+
+/** Estado do render (queued|rendering|done|error) + motivo do erro (null limpa). */
+export async function setRenderStatus(
+  tx: Tx,
+  id: string,
+  status: "queued" | "rendering" | "done" | "error",
+  error: string | null = null,
+): Promise<void> {
+  await tx`
+    UPDATE content_items
+       SET render_status = ${status}, render_error = ${error}, updated_at = now()
+     WHERE id = ${id}
+  `
+}
+
+export type MotionProps = Record<string, unknown>
+
+/** Peças de motion com render pendente (para a varredura do serviço de render). */
+export async function listQueuedMotion(tx: Tx): Promise<
+  { id: string; slug: string; motion_preset: string | null; motion_aspect: string | null }[]
+> {
+  return (await tx`
+    SELECT id, slug, motion_preset, motion_aspect
+      FROM content_items
+     WHERE is_motion = true AND render_status = 'queued'
+     ORDER BY created_at ASC
+  `) as unknown as { id: string; slug: string; motion_preset: string | null; motion_aspect: string | null }[]
+}
+
+/** motion_props (campos do preset) da revisão atual de uma peça de motion. */
+export async function getMotionProps(tx: Tx, itemId: string): Promise<MotionProps | null> {
+  const rows = (await tx`
+    SELECT cr.motion_props
+      FROM content_items ci
+      JOIN content_revisions cr ON cr.id = ci.current_revision_id
+     WHERE ci.id = ${itemId}
+  `) as unknown as { motion_props: MotionProps | null }[]
+  return rows[0]?.motion_props ?? null
 }
 
 /** Registra (ou limpa, com null) o erro da última tentativa de publicação em
@@ -198,11 +280,13 @@ export async function addRevision(
     authorId?: string | null
     /** SEO (ex.: { keywords: string[] }) — persistido no jsonb da revisão. */
     seo?: Record<string, unknown>
+    /** Campos do preset de motion (words/quote/slides/stat+source) — coluna dedicada. */
+    motionProps?: Record<string, unknown>
   },
 ): Promise<string> {
   const [rev] = (await tx`
-    INSERT INTO content_revisions (content_item_id, title, body_markdown, excerpt, seo, ai_generated, author_id)
-    VALUES (${itemId}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, ${tx.json((input.seo ?? {}) as Json)}, ${input.ai}, ${input.authorId ?? null})
+    INSERT INTO content_revisions (content_item_id, title, body_markdown, excerpt, seo, motion_props, ai_generated, author_id)
+    VALUES (${itemId}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, ${tx.json((input.seo ?? {}) as Json)}, ${input.motionProps ? tx.json(input.motionProps as Json) : null}, ${input.ai}, ${input.authorId ?? null})
     RETURNING id
   `) as unknown as { id: string }[]
   await tx`

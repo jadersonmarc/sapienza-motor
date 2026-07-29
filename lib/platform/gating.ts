@@ -81,3 +81,29 @@ export async function storageQuotaMb(sql: Sql, tenantId: string): Promise<number
   }
   return DEFAULT_STORAGE_MB
 }
+
+// Capability de MOTION (vídeo animado) por tier — diferencial dos planos Pro e
+// Premium. Vem de product_rules.rules.motion_enabled = { start, pro, scale } (1 =
+// libera). Fallback conservador (false) se as regras ainda não foram materializadas
+// (pnpm pricing:sync) — nunca chutar liberado.
+export async function motionEnabled(sql: Sql, tenantId: string): Promise<boolean> {
+  const tier = await tierOf(sql, tenantId)
+  if (!tier) return false
+  const rules = await productRules(sql)
+  const map = rules.motion_enabled
+  if (map && typeof map === "object") {
+    const v = (map as Record<string, unknown>)[tier]
+    if (typeof v === "number") return v === 1
+    if (typeof v === "boolean") return v
+  }
+  return false
+}
+
+// Peso de uma peça de motion na cota de peça publicada. Vem de
+// product_rules.rules.motion_weight (escalar). Default 1 = conta como qualquer
+// outra peça (é o valor de lançamento). Nunca chutar > 1.
+export async function motionWeight(sql: Sql): Promise<number> {
+  const rules = await productRules(sql)
+  const w = rules.motion_weight
+  return typeof w === "number" && w > 0 ? w : 1
+}
