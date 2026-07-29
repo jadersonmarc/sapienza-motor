@@ -48,7 +48,12 @@ export async function contentTransition(
       await tx`UPDATE content_items SET status='published', published_at=COALESCE(published_at, now()), updated_at=now() WHERE id=${itemId}`
       if (firstPublish) {
         const period = currentPeriod()
-        await emitUsageRecorded(tx, { tenantId, metric: "peca", count: 1, period })
+        // Peça de motion consome o peso motion_weight (lançamento = 1 → igual às
+        // demais; hard-cap continua batendo por contagem crua). motion_weight > 1
+        // ainda exigiria refletir no pré-cheque de assertPublishAllowed e no
+        // billing:close do core — TODO, decisão futura (não abrir na Fase 1).
+        const weight = item.is_motion ? Number(rules["motion_weight"] ?? 1) : 1
+        await emitUsageRecorded(tx, { tenantId, metric: "peca", count: weight, period })
       }
     } else if (to === "draft") {
       // Voltar a rascunho (ex.: rejeição) reseta o agendamento e a janela de aprovação,

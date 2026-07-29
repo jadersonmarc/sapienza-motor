@@ -101,6 +101,7 @@ export class WebhookChannel implements Channel {
       title: input.title,
       body_markdown: input.body,
       image_url: input.imageUrl ?? null,
+      video_url: input.videoUrl ?? null, // MP4 da peça de motion (Fase 1)
       published_at: new Date().toISOString(),
     })
     const signature = createHmac("sha256", secret).update(payload).digest("hex")

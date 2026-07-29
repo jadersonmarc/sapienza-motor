@@ -193,6 +193,35 @@ maybe("motor API", () => {
     expect(detail.revision).not.toBeNull()
   })
 
+  it("motion: capability por plano — start rejeita (403), pro cria (202)", async () => {
+    const { POST } = await import("@/app/api/v1/content/motion/route")
+    const { GET } = await import("@/app/api/v1/content/[id]/route")
+
+    // Start não tem motion (motion_enabled.start = 0) → 403 de capability.
+    const start = await provisionTenant(sql, "start")
+    const denied = await POST(
+      req("POST", "/api/v1/content/motion", await token(start), { prompt: "convite webinar" }),
+    )
+    expect(denied.status).toBe(403)
+
+    // Pro cria (202); sem IA o conteúdo cai no fallback (preset headline), render fica 'queued'.
+    const pro = await provisionTenant(sql, "pro")
+    const proTok = await token(pro)
+    const res = await POST(req("POST", "/api/v1/content/motion", proTok, { prompt: "convite webinar" }))
+    expect(res.status).toBe(202)
+    const { id } = (await res.json()) as { id: string }
+
+    const got = await GET(req("GET", `/api/v1/content/${id}`, proTok), { params: Promise.resolve({ id }) })
+    const detail = (await got.json()) as {
+      is_motion: boolean
+      render_status: string
+      motion_preset: string | null
+    }
+    expect(detail.is_motion).toBe(true)
+    expect(detail.render_status).toBe("queued")
+    expect(detail.motion_preset).toBe("headline")
+  })
+
   it("PUT /content/:id edita → nova revisão atual", async () => {
     const t = await provisionTenant(sql)
     const item = await withTenant(sql, t, (tx) =>

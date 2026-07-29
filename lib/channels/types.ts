@@ -28,6 +28,10 @@ export type PublishInput = {
   title: string
   body: string
   imageUrl?: string // URL pública (obrigatória p/ Instagram)
+  videoUrl?: string // MP4 da peça de motion. Fase 1: só o canal Webhook usa.
+  // FASE 2: publicação nativa de vídeo (Instagram Reels, LinkedIn video) — cada
+  // canal passa a ler videoUrl e usar o fluxo de vídeo da sua API. Não implementado
+  // na Fase 1 (motion publica só pelo Webhook).
 }
 
 export interface Channel {

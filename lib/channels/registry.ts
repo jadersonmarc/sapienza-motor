@@ -129,22 +129,26 @@ export async function publishItem(
   imageUrl?: string,
 ): Promise<{ platform: Platform; url: string }[]> {
   // Conteúdo atual + slug + canais + rascunhos sociais, numa leitura tenant-scoped.
-  const { slug, title, body, alreadyPublished, channels, socialByPlatform, sentPlatforms } = await withTenant(sql, tenantId, async (tx) => {
+  const { slug, title, body, videoUrl, alreadyPublished, channels, socialByPlatform, sentPlatforms } = await withTenant(sql, tenantId, async (tx) => {
     const [item] = (await tx`
-      SELECT ci.slug, ci.format, ci.published_at, cr.title, cr.body_markdown
+      SELECT ci.slug, ci.format, ci.is_motion, ci.video_url, ci.published_at, cr.title, cr.body_markdown
         FROM content_items ci
         JOIN content_revisions cr ON cr.id = ci.current_revision_id
        WHERE ci.id = ${itemId}
     `) as unknown as {
       slug: string
       format: string
+      is_motion: boolean
+      video_url: string | null
       published_at: string | null
       title: string
       body_markdown: string
     }[]
     if (!item) throw new Error("peça ou revisão não encontrada")
-    // Publica SÓ nos canais do formato da peça (não vaza para os outros).
-    const allowed = PLATFORMS_FOR_FORMAT[item.format]
+    // Peça de MOTION (vídeo): FASE 1 publica EXCLUSIVAMENTE pelo canal Webhook (que
+    // manda a URL do MP4). Publicação nativa de vídeo (IG Reels/LinkedIn) é Fase 2.
+    // Peça normal: só nos canais do formato (não vaza para os outros).
+    const allowed = item.is_motion ? (["webhook"] as Platform[]) : PLATFORMS_FOR_FORMAT[item.format]
     const allChannels = (await tx`
       SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true
     `) as unknown as { platform: Platform; credentials_enc: string | null }[]
@@ -167,6 +171,7 @@ export async function publishItem(
       slug: item.slug,
       title: item.title,
       body: item.body_markdown,
+      videoUrl: item.video_url ?? undefined,
       alreadyPublished: item.published_at != null,
       channels,
       socialByPlatform,
@@ -214,7 +219,7 @@ export async function publishItem(
     const creds = ch.credentials_enc ? decryptSecret(ch.credentials_enc) : null
     const channelBody = bodyFor(ch.platform)
     try {
-      const { url } = await driver.publish({ slug, title, body: channelBody, imageUrl }, creds)
+      const { url } = await driver.publish({ slug, title, body: channelBody, imageUrl, videoUrl }, creds)
       results.push({ platform: ch.platform, url })
       await withTenant(sql, tenantId, async (tx) => {
         await tx`
