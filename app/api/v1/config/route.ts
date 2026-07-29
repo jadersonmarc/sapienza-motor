@@ -39,6 +39,7 @@ export async function PUT(req: Request): Promise<Response> {
     model: body.model ? String(body.model).trim() : null,
     enabled: body.enabled !== false,
     cadence_days,
+    handle: String(body.handle ?? "").trim().slice(0, 60),
   }
 
   const sql = getDb()

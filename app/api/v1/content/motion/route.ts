@@ -25,8 +25,11 @@ export async function POST(req: Request): Promise<Response> {
     return json(403, { error: "motion não disponível no seu plano (disponível no Pro e no Premium)" })
   }
 
-  const body = (await req.json().catch(() => ({}))) as { prompt?: string }
+  const body = (await req.json().catch(() => ({}))) as { prompt?: string; channel?: string }
   const prompt = (body.prompt ?? "").trim()
+  // Canal-alvo do vídeo (define o formato da peça). Fase 1 publica só pelo Webhook;
+  // na Fase 2 o publish nativo usa este canal (instagram/linkedin).
+  const channel = body.channel === "linkedin" ? "linkedin" : "instagram"
 
   // Cota de peça (motion consome como qualquer peça) — debita antes de agendar a IA.
   try {
@@ -38,7 +41,9 @@ export async function POST(req: Request): Promise<Response> {
 
   const cfg = await withTenant(sql, a.tenantId, (tx) => getEditorConfig(tx))
   const slug = `${slugify(prompt) || "motion"}-${Date.now().toString(36)}`
-  const item = await withTenant(sql, a.tenantId, (tx) => createMotionItem(tx, { slug, authorId: a.userId }))
+  const item = await withTenant(sql, a.tenantId, (tx) =>
+    createMotionItem(tx, { slug, format: channel, authorId: a.userId }),
+  )
 
   await runAfterResponse(async () => {
     try {

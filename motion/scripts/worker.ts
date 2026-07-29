@@ -9,6 +9,7 @@ import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { activeTenants } from "@/lib/platform/gating"
 import { listQueuedMotion, getMotionProps, setItemVideo, setRenderStatus } from "@/lib/content/store"
+import { getEditorConfig } from "@/lib/content/editor-config"
 import { contentTransition } from "@/lib/content/transition"
 import { uploadObject, isStorageConfigured } from "@/lib/storage/s3"
 import { motionVideoKey } from "@/lib/storage/keys"
@@ -51,11 +52,14 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     if (!isStorageConfigured()) throw new Error("storage R2 não configurado (S3_* / MOTOR_PUBLIC_URL)")
     const preset = item.motion_preset
     const aspect = item.motion_aspect
-    const data = await withTenant(sql, tenantId, (tx) => getMotionProps(tx, item.id))
+    const { data, handle } = await withTenant(sql, tenantId, async (tx) => ({
+      data: await getMotionProps(tx, item.id),
+      handle: (await getEditorConfig(tx)).handle,
+    }))
     if (!preset || !aspect || !data) throw new Error("peça de motion sem preset/aspect/props")
 
     const serveUrl = await getServeUrl()
-    const inputProps = { aspect, brandHandle: BRAND_HANDLE, data }
+    const inputProps = { aspect, brandHandle: handle?.trim() || BRAND_HANDLE, data }
     const composition = await selectComposition({ serveUrl, id: compositionId(preset, aspect), inputProps })
     const opts = { composition, serveUrl, codec: "h264" as const, outputLocation: output, inputProps, licenseKey: LICENSE_KEY }
     await withTimeout(renderMedia(opts as Parameters<typeof renderMedia>[0]), TIMEOUT_MS, "render")

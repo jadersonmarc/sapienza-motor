@@ -117,25 +117,51 @@ export class WebhookChannel implements Channel {
   }
 }
 
+// Espera o container de vídeo/Reels do Instagram terminar o processamento (async).
+// Poll GET ?fields=status_code até FINISHED; ERROR/timeout → lança.
+async function waitForIgContainer(base: string, creationId: string, accessToken: string): Promise<void> {
+  for (let i = 0; i < 15; i++) {
+    const r = await fetch(`${base}/${creationId}?fields=status_code&access_token=${encodeURIComponent(accessToken)}`, {
+      signal: AbortSignal.timeout(15000),
+    })
+    if (r.ok) {
+      const { status_code } = (await r.json()) as { status_code?: string }
+      if (status_code === "FINISHED") return
+      if (status_code === "ERROR") throw new Error("instagram: processamento do vídeo falhou (ERROR)")
+    }
+    await new Promise((res) => setTimeout(res, 5000))
+  }
+  throw new Error("instagram: vídeo ainda processando (timeout) — tenta de novo no próximo ciclo")
+}
+
 export class InstagramChannel implements Channel {
   readonly platform: Platform = "instagram"
   async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
     if (!credentials) throw new Error("instagram: credenciais ausentes")
-    if (!input.imageUrl) throw new Error("instagram: gere a imagem da peça antes de publicar")
     const { access_token, account_id } = JSON.parse(credentials) as {
       access_token: string
       account_id: string
     }
     const base = "https://graph.facebook.com/v21.0"
-    // 1) cria o container de mídia
+    // 1) cria o container: Reels (vídeo/motion) ou imagem.
+    let body: Record<string, unknown>
+    if (input.videoUrl) {
+      body = { media_type: "REELS", video_url: input.videoUrl, caption: cap(input.body, 2200), access_token }
+    } else if (input.imageUrl) {
+      body = { image_url: input.imageUrl, caption: cap(input.body, 2200), access_token }
+    } else {
+      throw new Error("instagram: gere a imagem ou o vídeo da peça antes de publicar")
+    }
     const create = await fetch(`${base}/${account_id}/media`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image_url: input.imageUrl, caption: cap(input.body, 2200), access_token }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(20000),
     })
     if (!create.ok) throw new Error(`instagram media: ${create.status} ${await create.text().catch(() => "")}`)
     const { id: creationId } = (await create.json()) as { id: string }
+    // Vídeo é processado de forma assíncrona — espera ficar FINISHED antes de publicar.
+    if (input.videoUrl) await waitForIgContainer(base, creationId, access_token)
     // 2) publica o container
     const pub = await fetch(`${base}/${account_id}/media_publish`, {
       method: "POST",
@@ -234,6 +260,90 @@ async function uploadLinkedinImage(accessToken: string, authorUrn: string, image
   }
 }
 
+// Sobe o MP4 da peça de motion pro LinkedIn (Videos API: initializeUpload →
+// PUT das partes → finalizeUpload) e devolve o URN do vídeo. Best-effort → null
+// em qualquer falha (o post sai só com texto). FASE 2: o fluxo segue a doc da
+// Videos API; precisa de validação com conta real (upload multipart + ETags).
+async function uploadLinkedinVideo(accessToken: string, authorUrn: string, videoUrl: string): Promise<string | null> {
+  try {
+    const bytes = await readImageBytes(videoUrl) // lê bytes genéricos do R2 (serve p/ MP4)
+    if (!bytes) {
+      console.error(`[linkedin-video] sem bytes do vídeo (${videoUrl})`)
+      return null
+    }
+    const init = await fetch("https://api.linkedin.com/rest/videos?action=initializeUpload", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({
+        initializeUploadRequest: {
+          owner: authorUrn,
+          fileSizeBytes: bytes.byteLength,
+          uploadCaptions: false,
+          uploadThumbnail: false,
+        },
+      }),
+      signal: AbortSignal.timeout(LI_TIMEOUT),
+    })
+    if (!init.ok) {
+      console.error(`[linkedin-video] initializeUpload ${init.status}: ${await init.text().catch(() => "")}`)
+      return null
+    }
+    const { value } = (await init.json()) as {
+      value?: {
+        video?: string
+        uploadToken?: string
+        uploadInstructions?: { uploadUrl: string; firstByte: number; lastByte: number }[]
+      }
+    }
+    if (!value?.video || !value.uploadInstructions?.length) {
+      console.error("[linkedin-video] initializeUpload sem video/uploadInstructions")
+      return null
+    }
+    const partIds: string[] = []
+    for (const ins of value.uploadInstructions) {
+      const part = bytes.slice(ins.firstByte, ins.lastByte + 1)
+      const up = await fetch(ins.uploadUrl, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/octet-stream" },
+        body: part,
+        signal: AbortSignal.timeout(60000), // upload de bytes — timeout maior
+      })
+      if (!up.ok) {
+        console.error(`[linkedin-video] PUT ${up.status}: ${await up.text().catch(() => "")}`)
+        return null
+      }
+      const etag = up.headers.get("etag")
+      if (etag) partIds.push(etag)
+    }
+    const fin = await fetch("https://api.linkedin.com/rest/videos?action=finalizeUpload", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({
+        finalizeUploadRequest: { video: value.video, uploadToken: value.uploadToken ?? "", uploadedPartIds: partIds },
+      }),
+      signal: AbortSignal.timeout(LI_TIMEOUT),
+    })
+    if (!fin.ok) {
+      console.error(`[linkedin-video] finalizeUpload ${fin.status}: ${await fin.text().catch(() => "")}`)
+      return null
+    }
+    return value.video
+  } catch (e) {
+    console.error("[linkedin-video] exceção:", e)
+    return null
+  }
+}
+
 export class LinkedinChannel implements Channel {
   readonly platform: Platform = "linkedin"
   async publish(input: PublishInput, credentials: string | null): Promise<{ url: string }> {
@@ -252,8 +362,11 @@ export class LinkedinChannel implements Channel {
     if (!accessToken) throw new Error("linkedin: access_token ausente")
     if (!authorUrn) authorUrn = await resolveLinkedinAuthor(accessToken)
 
-    // Anexa a imagem on-brand quando houver (best-effort — se falhar, sai texto).
-    const imageUrn = input.imageUrl ? await uploadLinkedinImage(accessToken, authorUrn, input.imageUrl) : null
+    // Vídeo (peça de motion) tem precedência; senão a imagem on-brand. Best-effort:
+    // se o upload falhar, o post sai só com texto.
+    const videoUrn = input.videoUrl ? await uploadLinkedinVideo(accessToken, authorUrn, input.videoUrl) : null
+    const imageUrn = !videoUrn && input.imageUrl ? await uploadLinkedinImage(accessToken, authorUrn, input.imageUrl) : null
+    const mediaUrn = videoUrn ?? imageUrn
 
     // API atual (Posts API); a /v2/ugcPosts é legada.
     const res = await fetch("https://api.linkedin.com/rest/posts", {
@@ -273,7 +386,7 @@ export class LinkedinChannel implements Channel {
           targetEntities: [],
           thirdPartyDistributionChannels: [],
         },
-        ...(imageUrn ? { content: { media: { id: imageUrn, title: cap(input.title, 400) } } } : {}),
+        ...(mediaUrn ? { content: { media: { id: mediaUrn, title: cap(input.title, 400) } } } : {}),
         lifecycleState: "PUBLISHED",
         isReshareDisabledByAuthor: false,
       }),

@@ -145,10 +145,12 @@ export async function publishItem(
       body_markdown: string
     }[]
     if (!item) throw new Error("peça ou revisão não encontrada")
-    // Peça de MOTION (vídeo): FASE 1 publica EXCLUSIVAMENTE pelo canal Webhook (que
-    // manda a URL do MP4). Publicação nativa de vídeo (IG Reels/LinkedIn) é Fase 2.
-    // Peça normal: só nos canais do formato (não vaza para os outros).
-    const allowed = item.is_motion ? (["webhook"] as Platform[]) : PLATFORMS_FOR_FORMAT[item.format]
+    // Peça de MOTION (vídeo): publica no canal nativo do formato (Instagram Reels /
+    // LinkedIn vídeo) E no Webhook, se conectados — cada canal usa videoUrl. Peça
+    // normal: só nos canais do formato (não vaza para os outros).
+    const allowed = item.is_motion
+      ? ([item.format, "webhook"] as Platform[])
+      : PLATFORMS_FOR_FORMAT[item.format]
     const allChannels = (await tx`
       SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true
     `) as unknown as { platform: Platform; credentials_enc: string | null }[]

@@ -13,6 +13,8 @@ export type EditorConfig = {
   model: string | null
   enabled: boolean
   cadence_days: number
+  /** Handle da marca no rodapé das peças de motion (ex.: @cliente). Vazio = default. */
+  handle: string
 }
 
 const DEFAULTS: EditorConfig = {
@@ -23,11 +25,12 @@ const DEFAULTS: EditorConfig = {
   model: null,
   enabled: true,
   cadence_days: 7,
+  handle: "",
 }
 
 export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
   const rows = (await tx`
-    SELECT system_prompt, tone, themes, format, model, enabled, cadence_days FROM editor_config WHERE id = true
+    SELECT system_prompt, tone, themes, format, model, enabled, cadence_days, handle FROM editor_config WHERE id = true
   `) as unknown as {
     system_prompt: string
     tone: string
@@ -36,6 +39,7 @@ export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
     model: string | null
     enabled: boolean
     cadence_days: number
+    handle: string | null
   }[]
   const r = rows[0]
   if (!r) return { ...DEFAULTS }
@@ -48,13 +52,14 @@ export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
     model: r.model,
     enabled: r.enabled,
     cadence_days: r.cadence_days ?? 7,
+    handle: r.handle ?? "",
   }
 }
 
 export async function upsertEditorConfig(tx: Tx, cfg: EditorConfig): Promise<void> {
   await tx`
-    INSERT INTO editor_config (id, system_prompt, tone, themes, format, model, enabled, cadence_days, updated_at)
-    VALUES (true, ${cfg.system_prompt}, ${cfg.tone}, ${tx.json(cfg.themes)}, ${cfg.format}, ${cfg.model}, ${cfg.enabled}, ${cfg.cadence_days}, now())
+    INSERT INTO editor_config (id, system_prompt, tone, themes, format, model, enabled, cadence_days, handle, updated_at)
+    VALUES (true, ${cfg.system_prompt}, ${cfg.tone}, ${tx.json(cfg.themes)}, ${cfg.format}, ${cfg.model}, ${cfg.enabled}, ${cfg.cadence_days}, ${cfg.handle}, now())
     ON CONFLICT (id) DO UPDATE SET
       system_prompt = EXCLUDED.system_prompt,
       tone = EXCLUDED.tone,
@@ -63,6 +68,7 @@ export async function upsertEditorConfig(tx: Tx, cfg: EditorConfig): Promise<voi
       model = EXCLUDED.model,
       enabled = EXCLUDED.enabled,
       cadence_days = EXCLUDED.cadence_days,
+      handle = EXCLUDED.handle,
       updated_at = now()
   `
 }

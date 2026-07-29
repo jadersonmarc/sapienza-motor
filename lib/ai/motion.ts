@@ -17,8 +17,8 @@ export type { MotionPreset, MotionAspect, MotionProps }
 // descartamos `stat` e regeneramos SEM ele. Nunca deixamos ir ao ar um número
 // inventado (silêncio=aprovado em 48h publicaria sob a marca do cliente).
 
-// Fase 1 gera só aspectos de FEED (1x1/4x5); 9x16 (story) fica p/ Fase 2.
-export const MOTION_ASPECTS: readonly MotionAspect[] = ["1x1", "4x5"]
+// Aspectos que a geração pode escolher: feed (1x1/4x5) + story (9x16).
+export const MOTION_ASPECTS: readonly MotionAspect[] = ["1x1", "4x5", "9x16"]
 
 export type MotionContent = {
   preset: MotionPreset
@@ -75,7 +75,7 @@ function schemaFor(allowStat: boolean) {
     required: ["preset", "aspect", "title", "caption"],
     properties: {
       preset: { type: "string", enum: [...presets] },
-      aspect: { type: "string", enum: [...MOTION_ASPECTS], description: "1x1 (feed) ou 4x5 (feed)" },
+      aspect: { type: "string", enum: [...MOTION_ASPECTS], description: "1x1/4x5 (feed) ou 9x16 (story vertical)" },
       title: { type: "string", description: "Título curto de uso interno" },
       caption: { type: "string", description: "Legenda pronta para publicar" },
       headline: {
