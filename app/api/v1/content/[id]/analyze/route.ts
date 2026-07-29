@@ -49,6 +49,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return json(200, { type, payload, model })
   } catch (e) {
     if (e instanceof AiNotConfiguredError) return json(503, { error: "IA não configurada" })
-    throw e
+    // Qualquer outra falha (IA recusou, truncou, JSON inválido, erro da API/SDK)
+    // vira erro ESTRUTURADO — o console mostra a causa em vez de um 500 opaco.
+    const msg = e instanceof Error ? e.message : "falha ao rodar a análise"
+    return json(502, { error: msg })
   }
 }
