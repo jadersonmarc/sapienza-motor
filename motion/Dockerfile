@@ -31,5 +31,11 @@ RUN pnpm copy-assets
 
 ENV PORT=3200
 EXPOSE 3200
+
+# Health check via Node (imagem slim não tem curl/wget). GET /health → 200.
+# start-period cobre o copy-assets + boot; render longo não bloqueia (rota é leve).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:3200/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+
 # Sobe o worker HTTP: POST /trigger (x-webhook-secret) roda o scan; GET /health.
 CMD ["pnpm", "render-worker"]
