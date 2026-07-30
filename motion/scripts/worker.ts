@@ -61,7 +61,21 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     const serveUrl = await getServeUrl()
     const inputProps = { aspect, brandHandle: handle?.trim() || BRAND_HANDLE, data }
     const composition = await selectComposition({ serveUrl, id: compositionId(preset, aspect), inputProps })
-    const opts = { composition, serveUrl, codec: "h264" as const, outputLocation: output, inputProps, licenseKey: LICENSE_KEY }
+    // Otimizado para vídeo social curto (sem áudio): frames em jpeg (mais rápido
+    // que png) e encode x264 com preset veloz + crf moderado — corta o tempo de
+    // render sem perda visível no feed.
+    const opts = {
+      composition,
+      serveUrl,
+      codec: "h264" as const,
+      outputLocation: output,
+      inputProps,
+      licenseKey: LICENSE_KEY,
+      imageFormat: "jpeg" as const,
+      jpegQuality: 80,
+      x264Preset: "faster" as const,
+      crf: 23,
+    }
     await withTimeout(renderMedia(opts as Parameters<typeof renderMedia>[0]), TIMEOUT_MS, "render")
 
     const buf = await readFile(output)
@@ -142,4 +156,9 @@ const server = http.createServer((req, res) => {
   res.end()
 })
 
-server.listen(PORT, () => console.log(`[motion-worker] ouvindo em :${PORT} (concorrência ${CONCURRENCY}, timeout ${TIMEOUT_MS}ms)`))
+server.listen(PORT, () => {
+  console.log(`[motion-worker] ouvindo em :${PORT} (concorrência ${CONCURRENCY}, timeout ${TIMEOUT_MS}ms)`)
+  // Pré-aquece o bundle do Remotion no boot para o 1º render não pagar o custo
+  // de bundling (~dezenas de s). Falha aqui não derruba o worker.
+  getServeUrl().catch((e) => console.error("[motion-worker] warmup do bundle falhou:", e))
+})

@@ -28,6 +28,9 @@ WORKDIR /app/motion
 RUN pnpm install --frozen-lockfile
 # Copia as fontes da marca (../assets/fonts) para public/fonts (staticFile).
 RUN pnpm copy-assets
+# Baixa o Chromium do Remotion no BUILD (não no 1º render) — o 1º vídeo após um
+# deploy não paga mais o download. Cacheia dentro da imagem.
+RUN pnpm exec remotion browser ensure
 
 ENV PORT=3200
 EXPOSE 3200
