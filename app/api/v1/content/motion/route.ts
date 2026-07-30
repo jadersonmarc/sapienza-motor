@@ -10,6 +10,25 @@ import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib
 
 export const runtime = "nodejs"
 
+// Cutuca o serviço de render assim que a peça fica pronta para render, em vez de
+// esperar o próximo tick do cron (até 5 min). Fire-and-forget: se a URL/secret não
+// estiverem setados, ou a chamada falhar, o cron ainda pega a peça na fila. O
+// /trigger é idempotente e guardado por um flag de "scanning" no worker.
+async function pokeRenderWorker(): Promise<void> {
+  const url = process.env.MOTION_RENDER_URL
+  const secret = process.env.WEBHOOK_SECRET
+  if (!url || !secret) return
+  try {
+    await fetch(`${url.replace(/\/$/, "")}/trigger`, {
+      method: "POST",
+      headers: { "x-webhook-secret": secret },
+      signal: AbortSignal.timeout(5_000),
+    })
+  } catch (e) {
+    console.error("[motion] não consegui cutucar o render (cron pega depois):", e)
+  }
+}
+
 // POST /api/v1/content/motion — cria uma peça de MOTION (vídeo animado). CAPABILITY:
 // só tenants com motion habilitado no plano (Pro/Premium) — senão 403. A peça nasce
 // generating + render_status='queued'; o conteúdo do preset é gerado do brief em
@@ -65,7 +84,8 @@ export async function POST(req: Request): Promise<Response> {
         await setMotionMeta(tx, item.id, { preset: content.preset, aspect: content.aspect })
         await finishGenerating(tx, item.id, null)
       })
-      // render_status segue 'queued' → o serviço de render pega a fila.
+      // render_status segue 'queued' → cutuca o render agora (cron é só fallback).
+      await pokeRenderWorker()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       console.error(`[motion] falha ao gerar conteúdo (peça ${item.id}):`, msg)
