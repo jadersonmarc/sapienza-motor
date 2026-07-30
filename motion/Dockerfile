@@ -18,6 +18,12 @@ RUN corepack enable
 WORKDIR /app
 COPY . /app
 
+# Deps do pacote RAIZ do motor. motion/ importa ../lib, cujos módulos (postgres,
+# jose, @anthropic-ai/sdk, @aws-sdk...) resolvem node_modules subindo a partir de
+# /app/lib → /app/node_modules. Sem este install o worker morre no boot com
+# "Cannot find module 'postgres'" (require stack: /app/lib/db.ts).
+RUN pnpm install --frozen-lockfile
+
 WORKDIR /app/motion
 RUN pnpm install --frozen-lockfile
 # Copia as fontes da marca (../assets/fonts) para public/fonts (staticFile).
