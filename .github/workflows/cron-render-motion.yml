@@ -1,11 +1,13 @@
 name: Cron · renderizar motion
 
 # Aciona o serviço de render: peças de motion com render_status='queued' são
-# renderizadas (MP4), sobem ao R2 e entram em aprovação. A cada 5 min.
+# renderizadas (MP4), sobem ao R2 e entram em aprovação. A cada 1 min — rede de
+# segurança: a criação já cutuca o render na hora (MOTION_RENDER_URL/trigger); o
+# cron pega stragglers (falhas/retentativas) rápido.
 # Secrets: MOTION_URL (URL pública do serviço de render), WEBHOOK_SECRET.
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/1 * * * *"
   workflow_dispatch:
 
 jobs:
