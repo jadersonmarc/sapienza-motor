@@ -9,6 +9,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "provision": "tsx scripts/provision.ts",
+    "validate:channel": "tsx scripts/validate-channel.ts",
     "test": "vitest run"
   },
   "dependencies": {
