@@ -249,3 +249,102 @@ export async function publishItem(
   if (failures.length > 0) throw new PartialPublishError(results, failures)
   return results
 }
+
+/** A peça ainda não foi publicada — reprocesso de canais não se aplica. */
+export class NotPublishedError extends Error {
+  constructor() {
+    super("peça ainda não foi publicada")
+    this.name = "NotPublishedError"
+  }
+}
+
+/**
+ * Reprocessa APENAS os canais que ainda não receberam esta peça (falharam numa
+ * publicação anterior). Para peça JÁ publicada: não transiciona nem fatura de novo
+ * (billing é por peça) e nunca republica onde já saiu (`status='sent'`). Retorna o
+ * que saiu agora e o que ainda falhou — o chamador atualiza publish_error.
+ * A leitura espelha a do publishItem (mesmas tabelas/regras de roteamento).
+ */
+export async function retryFailedChannels(
+  sql: Sql,
+  tenantId: string,
+  itemId: string,
+  drivers: Drivers = defaultDrivers(),
+  imageUrl?: string,
+): Promise<{ published: { platform: Platform; url: string }[]; failures: { platform: Platform; error: string }[] }> {
+  const ctx = await withTenant(sql, tenantId, async (tx) => {
+    const [item] = (await tx`
+      SELECT ci.slug, ci.format, ci.is_motion, ci.video_url, ci.published_at, cr.title, cr.body_markdown
+        FROM content_items ci
+        JOIN content_revisions cr ON cr.id = ci.current_revision_id
+       WHERE ci.id = ${itemId}
+    `) as unknown as {
+      slug: string
+      format: string
+      is_motion: boolean
+      video_url: string | null
+      published_at: string | null
+      title: string
+      body_markdown: string
+    }[]
+    if (!item) throw new Error("peça ou revisão não encontrada")
+    if (item.published_at == null) throw new NotPublishedError()
+    const allowed = item.is_motion
+      ? ([item.format, "webhook"] as Platform[])
+      : PLATFORMS_FOR_FORMAT[item.format]
+    const allChannels = (await tx`
+      SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true
+    `) as unknown as { platform: Platform; credentials_enc: string | null }[]
+    const channels = allowed ? allChannels.filter((c) => allowed.includes(c.platform)) : allChannels
+    const drafts = (await tx`
+      SELECT DISTINCT ON (platform) platform, body, hashtags FROM social_drafts
+       WHERE content_item_id = ${itemId} AND status IN ('draft','approved')
+       ORDER BY platform, created_at DESC
+    `) as unknown as { platform: Platform; body: string; hashtags: string[] }[]
+    const sent = (await tx`
+      SELECT platform FROM social_drafts WHERE content_item_id = ${itemId} AND status = 'sent'
+    `) as unknown as { platform: Platform }[]
+    return {
+      slug: item.slug,
+      title: item.title,
+      body: item.body_markdown,
+      videoUrl: item.video_url ?? undefined,
+      channels,
+      socialByPlatform: new Map(drafts.map((d) => [d.platform, d])),
+      sentSet: new Set(sent.map((s) => s.platform)),
+    }
+  })
+
+  const bodyFor = (platform: Platform): string => {
+    const d = ctx.socialByPlatform.get(platform)
+    if (!d) return ctx.body
+    const tags = (d.hashtags ?? []).map((h) => `#${h}`).join(" ")
+    return tags ? `${d.body}\n\n${tags}` : d.body
+  }
+
+  const published: { platform: Platform; url: string }[] = []
+  const failures: { platform: Platform; error: string }[] = []
+  for (const ch of ctx.channels) {
+    const driver = drivers[ch.platform]
+    if (!driver) continue
+    if (ctx.sentSet.has(ch.platform)) continue // já saiu antes — nunca republica
+    const creds = ch.credentials_enc ? decryptSecret(ch.credentials_enc) : null
+    const channelBody = bodyFor(ch.platform)
+    try {
+      const { url } = await driver.publish(
+        { slug: ctx.slug, title: ctx.title, body: channelBody, imageUrl, videoUrl: ctx.videoUrl },
+        creds,
+      )
+      published.push({ platform: ch.platform, url })
+      await withTenant(sql, tenantId, async (tx) => {
+        await tx`
+          INSERT INTO social_drafts (content_item_id, platform, body, status, image_url, post_url)
+          VALUES (${itemId}, ${ch.platform}, ${channelBody}, 'sent', ${imageUrl ?? null}, ${url})
+        `
+      })
+    } catch (e) {
+      failures.push({ platform: ch.platform, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return { published, failures }
+}
