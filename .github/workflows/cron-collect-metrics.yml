@@ -1,0 +1,17 @@
+name: Cron · coletar métricas
+
+# Coleta o snapshot diário de métricas dos posts publicados (por canal com
+# adapter + credencial). Idempotente por dia. 1×/dia, 08:00 UTC.
+# Secrets: MOTOR_URL, WEBHOOK_SECRET.
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.MOTOR_URL }}/api/cron/collect-metrics" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"
