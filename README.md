@@ -78,6 +78,29 @@ ficam cifradas em `motor_channels`.
 > devolve `null` e a publicação segue sem imagem — o que funciona para blog/LinkedIn/X/Facebook,
 > mas faz IG/Threads falharem. Se for usar esses dois, configure o R2/S3.
 
+#### Validação de canais (contra conta real) — checklist
+
+O código está coberto por testes de **forma de request** (`lib/channels/impls.test.ts`), mas cada
+canal só está *provado de ponta a ponta* depois de um post real com as credenciais do cliente.
+Faça uma vez por canal que for oferecer:
+
+1. Conecte o canal em **`/motor/canais`** (o form pede exatamente os campos de
+   `REQUIRED_CREDENTIALS`, `app/api/v1/setup`): `instagram` → `access_token`+`account_id`;
+   `facebook` → `access_token`+`page_id`; `twitter` → `access_token`(+`username`);
+   `threads` → `access_token`+`user_id`; `linkedin` → só `access_token`; `wordpress` →
+   `site_url`+`username`+`app_password`; `webhook` → `url`+`secret`.
+2. Publique **uma peça de teste** e confirme que o post aparece de fato na conta (não só o 200).
+3. **Se falhar:** o erro fica em `content_items.publish_error` e aparece na peça. Corrija a
+   credencial e use **“Tentar novamente nos canais que falharam”** (reprocessa só os que faltaram,
+   sem republicar nem re-faturar). Se o canal não entrega de jeito nenhum, **desconecte-o** em
+   `/motor/canais` — canal que publica em silêncio e não entrega não pode ficar visível ao cliente.
+4. **LinkedIn vídeo (motion):** o fluxo `initialize→PUT→finalize` da Videos API **ainda não foi
+   validado contra conta real** — acompanhe o **primeiro** post de vídeo de perto; se a API
+   reclamar, ajuste `uploadLinkedinVideo` em `lib/channels/impls.ts`.
+
+> A validação real depende das contas/credenciais do cliente — é uma etapa de operação, não de
+> código. O código garante a forma do request, a visibilidade da falha e o reprocesso.
+
 ### IA
 
 `ANTHROPIC_API_KEY` é opcional, mas muda o comportamento:

@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { createHmac } from "node:crypto"
-import { WordpressChannel, WebhookChannel, LinkedinChannel } from "./impls"
+import {
+  WordpressChannel,
+  WebhookChannel,
+  LinkedinChannel,
+  InstagramChannel,
+  FacebookChannel,
+  TwitterChannel,
+  ThreadsChannel,
+} from "./impls"
 
 // Canais WordPress e Webhook (blog do site do cliente). Mockam o fetch — não
 // tocam rede. Verificam auth/HTML (WordPress) e a assinatura HMAC (Webhook).
@@ -166,5 +174,138 @@ describe("WebhookChannel", () => {
 
   it("sem credenciais, falha", async () => {
     await expect(new WebhookChannel().publish(input, null)).rejects.toThrow(/credenciais/)
+  })
+})
+
+// ── Canais mantidos contra APIs reais: forma do request + propagação de erro.
+// Tudo com fetch mockado (não toca rede). Validação contra CONTA real é do usuário
+// (runbook em README) — aqui travamos a regressão de forma.
+
+const igCreds = JSON.stringify({ access_token: "tok", account_id: "17800" })
+
+describe("InstagramChannel", () => {
+  it("imagem: cria o container e publica (2 chamadas ao Graph)", async () => {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u.endsWith("/17800/media")) return new Response(JSON.stringify({ id: "creation1" }), { status: 200 })
+      if (u.endsWith("/17800/media_publish")) return new Response(JSON.stringify({ id: "media9" }), { status: 200 })
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const { url } = await new InstagramChannel().publish(input, igCreds)
+    expect(url).toBe("https://www.instagram.com/p/media9")
+    const create = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([u]) => u.endsWith("/17800/media"))!
+    const sent = JSON.parse(create[1].body as string)
+    expect(sent.image_url).toBe("https://cdn/x.png")
+    expect(sent.access_token).toBe("tok")
+  })
+
+  it("Reels (vídeo): media_type REELS, espera FINISHED e publica", async () => {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u.endsWith("/17800/media")) return new Response(JSON.stringify({ id: "c2" }), { status: 200 })
+      if (u.includes("/c2?fields=status_code")) return new Response(JSON.stringify({ status_code: "FINISHED" }), { status: 200 })
+      if (u.endsWith("/17800/media_publish")) return new Response(JSON.stringify({ id: "reel3" }), { status: 200 })
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const { url } = await new InstagramChannel().publish({ ...input, videoUrl: "https://cdn/v.mp4" }, igCreds)
+    expect(url).toBe("https://www.instagram.com/p/reel3")
+    const create = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([u]) => u.endsWith("/17800/media"))!
+    expect(JSON.parse(create[1].body as string).media_type).toBe("REELS")
+  })
+
+  it("propaga erro do Graph (create não-ok)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad", { status: 400 })))
+    await expect(new InstagramChannel().publish(input, igCreds)).rejects.toThrow(/instagram media: 400/)
+  })
+})
+
+describe("FacebookChannel", () => {
+  const creds = JSON.stringify({ access_token: "tok", page_id: "42" })
+  it("sem imagem usa /feed; com imagem usa /photos", async () => {
+    const feed = vi.fn(async () => new Response(JSON.stringify({ id: "f1" }), { status: 200 }))
+    vi.stubGlobal("fetch", feed)
+    await new FacebookChannel().publish({ ...input, imageUrl: undefined }, creds)
+    expect((feed.mock.calls[0] as unknown as [string])[0]).toContain("/42/feed")
+
+    const photos = vi.fn(async () => new Response(JSON.stringify({ id: "p1", post_id: "42_9" }), { status: 200 }))
+    vi.stubGlobal("fetch", photos)
+    const { url } = await new FacebookChannel().publish(input, creds)
+    expect((photos.mock.calls[0] as unknown as [string])[0]).toContain("/42/photos")
+    expect(url).toBe("https://www.facebook.com/42_9")
+  })
+  it("propaga erro", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })))
+    await expect(new FacebookChannel().publish(input, creds)).rejects.toThrow(/facebook/)
+  })
+})
+
+describe("TwitterChannel", () => {
+  const creds = JSON.stringify({ access_token: "tok", username: "sapienza" })
+  it("corta o texto em 280 e posta", async () => {
+    let sentText = ""
+    const fetchMock = vi.fn(async (_u: string, init: RequestInit) => {
+      sentText = JSON.parse(init.body as string).text
+      return new Response(JSON.stringify({ data: { id: "99" } }), { status: 200 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const long = "a".repeat(500)
+    const { url } = await new TwitterChannel().publish({ ...input, body: long }, creds)
+    expect(sentText.length).toBe(280)
+    expect(url).toBe("https://x.com/sapienza/status/99")
+  })
+  it("propaga erro", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 401 })))
+    await expect(new TwitterChannel().publish(input, creds)).rejects.toThrow(/twitter/)
+  })
+})
+
+describe("ThreadsChannel", () => {
+  const creds = JSON.stringify({ access_token: "tok", user_id: "u7" })
+  it("cria o container e publica (2 passos)", async () => {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u.endsWith("/u7/threads")) return new Response(JSON.stringify({ id: "cont1" }), { status: 200 })
+      if (u.endsWith("/u7/threads_publish")) return new Response(JSON.stringify({ id: "th5" }), { status: 200 })
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    await new ThreadsChannel().publish(input, creds)
+    const create = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([u]) => u.endsWith("/u7/threads"))!
+    expect(JSON.parse(create[1].body as string).media_type).toBe("IMAGE")
+  })
+  it("propaga erro do create", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 400 })))
+    await expect(new ThreadsChannel().publish(input, creds)).rejects.toThrow(/threads create: 400/)
+  })
+})
+
+describe("LinkedinChannel — vídeo (motion)", () => {
+  it("sobe o MP4 (initialize→PUT→finalize) e referencia o vídeo em content.media", async () => {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u === "https://api.linkedin.com/v2/userinfo") return new Response(JSON.stringify({ sub: "abc" }), { status: 200 })
+      if (u === "https://cdn/v.mp4") return new Response("MP4BYTES", { status: 200 })
+      if (u === "https://api.linkedin.com/rest/videos?action=initializeUpload")
+        return new Response(
+          JSON.stringify({
+            value: {
+              video: "urn:li:video:7",
+              uploadToken: "utk",
+              uploadInstructions: [{ uploadUrl: "https://upload.li/v", firstByte: 0, lastByte: 7 }],
+            },
+          }),
+          { status: 200 },
+        )
+      if (u === "https://upload.li/v") return new Response("", { status: 200, headers: { etag: "et1" } })
+      if (u === "https://api.linkedin.com/rest/videos?action=finalizeUpload") return new Response("", { status: 200 })
+      if (u === "https://api.linkedin.com/rest/posts")
+        return new Response("", { status: 201, headers: { "x-restli-id": "urn:li:share:9" } })
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const { url } = await new LinkedinChannel().publish({ ...input, videoUrl: "https://cdn/v.mp4" }, "tok")
+    expect(url).toContain("urn:li:share:9")
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][]
+    expect(calls.some(([u]) => u === "https://api.linkedin.com/rest/videos?action=finalizeUpload")).toBe(true)
+    const post = calls.find(([u]) => u === "https://api.linkedin.com/rest/posts")!
+    expect(JSON.parse(post[1].body as string).content.media.id).toBe("urn:li:video:7")
   })
 })

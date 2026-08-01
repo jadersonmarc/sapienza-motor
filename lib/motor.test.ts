@@ -7,7 +7,7 @@ import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTi
 import { getEditorConfig, upsertEditorConfig } from "@/lib/content/editor-config"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
-import { connectChannel, publishItem, ChannelLimitError, PartialPublishError, type Drivers } from "@/lib/channels/registry"
+import { connectChannel, publishItem, retryFailedChannels, ChannelLimitError, PartialPublishError, type Drivers } from "@/lib/channels/registry"
 import {
   reserveGeneration,
   refundGeneration,
@@ -269,6 +269,40 @@ maybe("motor data plane", () => {
     expect(ig.published).toHaveLength(0)
     expect(li.published).toHaveLength(0)
     expect(await usage(sql, t, "peca")).toBe(1)
+  })
+
+  it("retry: reprocessa só o canal que falhou, sem republicar nem re-faturar", async () => {
+    const t = await provisionTenant(sql, "scale") // 3 canais
+    const item = await withTenant(sql, t, (tx) =>
+      createItem(tx, { slug: `retry-${randomUUID()}`, title: "T", bodyMarkdown: "corpo", format: "blog" }),
+    )
+    await connectChannel(sql, t, "blog")
+    await connectChannel(sql, t, "webhook", "creds")
+
+    // 1ª publicação: blog ok, webhook falha → PartialPublishError, mas a peça
+    // publica (billing = 1) e webhook fica sem 'sent'.
+    const blog = new MockChannel("blog")
+    const failing: Channel = {
+      platform: "webhook",
+      async publish(): Promise<{ url: string }> {
+        throw new Error("webhook fora do ar")
+      },
+    }
+    const first = { blog, webhook: failing } as unknown as Drivers
+    await expect(publishItem(sql, t, item.id, first)).rejects.toBeInstanceOf(PartialPublishError)
+    expect(blog.published).toHaveLength(1)
+    expect(await usage(sql, t, "peca")).toBe(1)
+
+    // Retry: webhook agora funciona; blog é pulado (já saiu). Não re-fatura.
+    const blog2 = new MockChannel("blog")
+    const webhook2 = new MockChannel("webhook")
+    const retryDrivers = { blog: blog2, webhook: webhook2 } as unknown as Drivers
+    const { published, failures } = await retryFailedChannels(sql, t, item.id, retryDrivers)
+    expect(failures).toHaveLength(0)
+    expect(published.map((p) => p.platform)).toEqual(["webhook"])
+    expect(blog2.published).toHaveLength(0) // não republica o que já saiu
+    expect(webhook2.published).toHaveLength(1)
+    expect(await usage(sql, t, "peca")).toBe(1) // billing intacto
   })
 
   it("publishItem: publica no canal (mock) e fatura 1 peça", async () => {
