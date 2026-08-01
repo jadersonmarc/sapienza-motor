@@ -18,8 +18,21 @@ catálogo**: `supportedPlatforms()` (`lib/channels/types.ts`) não os inclui, en
 nem podem ser conectados (`POST /channels` → 400). Reabilitar sem redeploy: `CHANNELS_EXPERIMENTAL=1`.
 Não implementar mídia para eles nem sugerir reativação.
 
-A contagem por plano (`plans.canais`: start 1 / pro 2 / scale 3) é enforced na conexão — o **gating**
-(contador na UI, downgrade, tenants acima do limite) é a **Etapa 2**, ainda não entregue.
+## Gating por plano (Etapa 2)
+
+Só **canais sociais** contam no limite do plano (`isCounted()` em `lib/channels/types.ts` = tudo
+exceto blog/wordpress/webhook). Limite por tier vem de `plans.canais` (start 1 / pro 2 / **scale =
+todos os disponíveis**; a cópia ao cliente no Premium **nunca cita o número**).
+
+- **Conexão:** `connectChannel` barra um social além do limite (`ChannelLimitError` → 409, com dica de
+  upgrade); blog/wp/webhook nunca são barrados. Troca de social é livre (desconectar libera o slot).
+- **Contador:** `GET /channels` devolve `used` (sociais) + `tier`; o console mostra "2 de 3" (ou
+  "todos os canais disponíveis" no Premium).
+- **Downgrade** (via Sapienza/superadmin): o core (`assertChannelsAllowDowngrade`) **trava** a redução
+  de tier do motor enquanto houver mais sociais conectados que o novo plano permite — o cliente
+  escolhe qual desconectar; nunca desconectamos por heurística.
+- **Tenant já acima do limite** (mudança de regra nossa): nada é desconectado; publicação segue; só
+  **novas conexões** são barradas até voltar ao limite.
 
 ## Validação contra conta real
 
