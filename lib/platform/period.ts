@@ -16,3 +16,17 @@ export function currentPeriod(now: Date = new Date()): string {
   const m = parts.find((p) => p.type === "month")!.value
   return `${y}-${m}`
 }
+
+// Dia-calendário em São Paulo — granularidade da série temporal de métricas
+// (envelope compartilhado com a Atendente). en-CA já formata como AAAA-MM-DD.
+const YMD = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Sao_Paulo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+})
+
+/** Dia corrente "AAAA-MM-DD" no fuso de São Paulo. */
+export function currentDay(now: Date = new Date()): string {
+  return YMD.format(now)
+}

@@ -29,6 +29,8 @@ export type ContentItem = {
   video_url: string | null
   render_status: string | null
   render_error: string | null
+  /** versão do editor_config vigente na criação (proveniência p/ métricas). */
+  config_version: number | null
   /** título da revisão atual (presente em listItems; ausente em getItem). */
   title?: string | null
 }
@@ -40,8 +42,9 @@ export async function createGeneratingItem(
   input: { slug: string; format?: string; pilar?: string | null; authorId?: string | null },
 ): Promise<{ id: string }> {
   const [item] = (await tx`
-    INSERT INTO content_items (slug, pilar, format, author_id, generating)
-    VALUES (${input.slug}, ${input.pilar ?? null}, ${input.format ?? "blog"}, ${input.authorId ?? null}, true)
+    INSERT INTO content_items (slug, pilar, format, author_id, generating, config_version)
+    VALUES (${input.slug}, ${input.pilar ?? null}, ${input.format ?? "blog"}, ${input.authorId ?? null}, true,
+            (SELECT config_version FROM editor_config WHERE id = true))
     RETURNING id
   `) as unknown as { id: string }[]
   return item
@@ -67,8 +70,9 @@ export async function createMotionItem(
   input: { slug: string; format?: string; authorId?: string | null },
 ): Promise<{ id: string }> {
   const [item] = (await tx`
-    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status)
-    VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, true, 'queued')
+    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status, config_version)
+    VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, true, 'queued',
+            (SELECT config_version FROM editor_config WHERE id = true))
     RETURNING id
   `) as unknown as { id: string }[]
   return item
@@ -166,8 +170,9 @@ export type NewItem = {
 /** Cria uma peça em draft + 1ª revisão, apontando current_revision_id. */
 export async function createItem(tx: Tx, input: NewItem): Promise<ContentItem> {
   const [item] = (await tx`
-    INSERT INTO content_items (slug, pilar, format, author_id)
-    VALUES (${input.slug}, ${input.pilar ?? null}, ${input.format ?? "blog"}, ${input.authorId ?? null})
+    INSERT INTO content_items (slug, pilar, format, author_id, config_version)
+    VALUES (${input.slug}, ${input.pilar ?? null}, ${input.format ?? "blog"}, ${input.authorId ?? null},
+            (SELECT config_version FROM editor_config WHERE id = true))
     RETURNING *
   `) as unknown as ContentItem[]
   // jsonb via tx.json (nunca JSON.stringify::jsonb — re-encoda e quebra o payload).

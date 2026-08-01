@@ -69,6 +69,15 @@ export async function upsertEditorConfig(tx: Tx, cfg: EditorConfig): Promise<voi
       enabled = EXCLUDED.enabled,
       cadence_days = EXCLUDED.cadence_days,
       handle = EXCLUDED.handle,
+      -- Bump a versão só quando muda algo que afeta a GERAÇÃO (prompt/tom/temas/
+      -- modelo) — não em toggles de enabled/cadência/handle. Cada peça carimba
+      -- esta versão na criação (proveniência p/ correlacionar com métricas).
+      config_version = editor_config.config_version + CASE WHEN (
+             editor_config.system_prompt IS DISTINCT FROM EXCLUDED.system_prompt
+          OR editor_config.tone          IS DISTINCT FROM EXCLUDED.tone
+          OR editor_config.themes        IS DISTINCT FROM EXCLUDED.themes
+          OR editor_config.model         IS DISTINCT FROM EXCLUDED.model
+        ) THEN 1 ELSE 0 END,
       updated_at = now()
   `
 }
