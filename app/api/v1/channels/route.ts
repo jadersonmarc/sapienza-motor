@@ -2,7 +2,7 @@ import { authed, isResponse, json, requireRole } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { canOperate, channelLimit } from "@/lib/platform/gating"
 import { enabledChannels, connectChannel, disconnectChannel, ChannelLimitError } from "@/lib/channels/registry"
-import { PLATFORMS, type Platform } from "@/lib/channels/types"
+import { PLATFORMS, isSupported, type Platform } from "@/lib/channels/types"
 
 export const runtime = "nodejs"
 
@@ -34,6 +34,9 @@ export async function POST(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as { platform?: string; credentials?: string }
   const platform = body.platform as Platform | undefined
   if (!platform || !PLATFORMS.includes(platform)) return json(400, { error: "invalid platform" })
+  // Fora do catálogo suportado (ex.: X/Threads sem a flag) não pode ser conectado,
+  // mesmo que o enum conheça a plataforma — defesa além de escondê-la na UI.
+  if (!isSupported(platform)) return json(400, { error: "channel not available" })
   try {
     await connectChannel(sql, a.tenantId, platform, body.credentials)
   } catch (e) {

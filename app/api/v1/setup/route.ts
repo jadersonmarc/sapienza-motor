@@ -2,7 +2,7 @@ import { authed, isResponse, json } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { tenantAccess, channelLimit } from "@/lib/platform/gating"
 import { enabledChannels } from "@/lib/channels/registry"
-import { PLATFORMS } from "@/lib/channels/types"
+import { supportedPlatforms } from "@/lib/channels/types"
 
 export const runtime = "nodejs"
 
@@ -31,7 +31,7 @@ export async function GET(req: Request): Promise<Response> {
       tier: access.tier,
       channelLimit: 0,
       connected: [],
-      available: PLATFORMS.map((p) => ({ platform: p, requires: REQUIRED_CREDENTIALS[p] })),
+      available: supportedPlatforms().map((p) => ({ platform: p, requires: REQUIRED_CREDENTIALS[p] })),
     })
   }
 
@@ -48,9 +48,8 @@ export async function GET(req: Request): Promise<Response> {
     slotsUsed: connected.length,
     slotsRemaining: Math.max(0, limit - connected.length),
     connected: connected.map((c) => c.platform),
-    available: PLATFORMS.filter((p) => !connectedSet.has(p)).map((p) => ({
-      platform: p,
-      requires: REQUIRED_CREDENTIALS[p],
-    })),
+    available: supportedPlatforms()
+      .filter((p) => !connectedSet.has(p))
+      .map((p) => ({ platform: p, requires: REQUIRED_CREDENTIALS[p] })),
   })
 }

@@ -23,6 +23,23 @@ export const PLATFORMS: Platform[] = [
   "webhook",
 ]
 
+// Catálogo REALMENTE ofertado ao cliente. X (twitter) e Threads seguem no enum e no
+// registry (código preservado), mas fora daqui não aparecem na UI nem podem ser
+// conectados via API. CHANNELS_EXPERIMENTAL=1 os reabilita sem redeploy de código.
+// Um canal que não passar na validação contra conta real sai deste array.
+const EXPERIMENTAL: Platform[] = ["twitter", "threads"]
+
+/** Plataformas suportadas (catálogo). Ponto único de verdade do que é ofertado. */
+export function supportedPlatforms(): Platform[] {
+  const experimental = process.env.CHANNELS_EXPERIMENTAL?.trim() === "1"
+  return PLATFORMS.filter((p) => experimental || !EXPERIMENTAL.includes(p))
+}
+
+/** true se a plataforma está no catálogo suportado (respeita a flag). */
+export function isSupported(platform: Platform): boolean {
+  return supportedPlatforms().includes(platform)
+}
+
 export type PublishInput = {
   slug: string
   title: string

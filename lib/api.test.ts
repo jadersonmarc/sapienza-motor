@@ -115,6 +115,27 @@ maybe("motor API", () => {
     expect(platforms).not.toContain("blog")
   })
 
+  it("catálogo: X/Threads fora de setup.available e conectar responde 400", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t, { role: "owner" })
+    const { GET: SETUP } = await import("@/app/api/v1/setup/route")
+    const { POST } = await import("@/app/api/v1/channels/route")
+
+    const setup = (await (await SETUP(req("GET", "/api/v1/setup", tok))).json()) as {
+      available: { platform: string }[]
+    }
+    const offered = setup.available.map((a) => a.platform)
+    expect(offered).toContain("instagram")
+    expect(offered).toContain("linkedin")
+    expect(offered).toContain("facebook")
+    expect(offered).not.toContain("twitter")
+    expect(offered).not.toContain("threads")
+
+    // A plataforma existe no enum, mas está fora do catálogo → 400 (não 409/200).
+    const res = await POST(req("POST", "/api/v1/channels", tok, { platform: "twitter", credentials: "x" }))
+    expect(res.status).toBe(400)
+  })
+
   it("desconectar exige owner/admin — member recebe 403", async () => {
     const t = await provisionTenant(sql, "pro")
     const { DELETE } = await import("@/app/api/v1/channels/route")
