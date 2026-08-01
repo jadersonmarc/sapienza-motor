@@ -1,22 +1,28 @@
 import { authed, isResponse, json, requireRole } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
-import { canOperate, channelLimit } from "@/lib/platform/gating"
+import { canOperate, channelLimit, tierOf } from "@/lib/platform/gating"
 import { enabledChannels, connectChannel, disconnectChannel, ChannelLimitError } from "@/lib/channels/registry"
-import { PLATFORMS, isSupported, type Platform } from "@/lib/channels/types"
+import { PLATFORMS, isSupported, isCounted, type Platform } from "@/lib/channels/types"
 
 export const runtime = "nodejs"
 
-// GET /api/v1/channels — canais habilitados + limite do tier.
+// GET /api/v1/channels — canais habilitados + limite/uso do tier.
+// `used` conta só canais SOCIAIS (o que entra no limite); `tier` orienta a cópia
+// da UI (no Premium/scale mostra "todos os canais", não o número).
 export async function GET(req: Request): Promise<Response> {
   const a = await authed(req)
   if (isResponse(a)) return a
   const sql = getDb()
-  const [channels, limit] = await Promise.all([
+  const [channels, limit, tier] = await Promise.all([
     enabledChannels(sql, a.tenantId),
     channelLimit(sql, a.tenantId),
+    tierOf(sql, a.tenantId),
   ])
+  const used = channels.filter((c) => isCounted(c.platform)).length
   return json(200, {
     limit,
+    used,
+    tier,
     channels: channels.map((c) => ({ platform: c.platform, enabled: c.enabled })),
   })
 }

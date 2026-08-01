@@ -40,6 +40,17 @@ export function isSupported(platform: Platform): boolean {
   return supportedPlatforms().includes(platform)
 }
 
+// Canais que CONTAM no limite do plano = os sociais. Blog, WordPress e Webhook são
+// encanamento (blog do cliente / publicação do motion), inclusos em todos os planos
+// e fora da contagem — nunca são bloqueados. Definido por exclusão para cobrir
+// automaticamente qualquer social futuro (ex.: X/Threads se reativados pela flag).
+const UNCOUNTED: Platform[] = ["blog", "wordpress", "webhook"]
+
+/** true se a plataforma conta no limite de canais do plano (canal social). */
+export function isCounted(platform: Platform): boolean {
+  return !UNCOUNTED.includes(platform)
+}
+
 export type PublishInput = {
   slug: string
   title: string

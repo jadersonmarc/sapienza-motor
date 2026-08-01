@@ -91,28 +91,46 @@ maybe("motor API", () => {
     expect(res.status).toBe(200)
   })
 
-  it("desconectar canal: some da lista e libera o slot do tier", async () => {
-    const t = await provisionTenant(sql, "start") // limite = 1 canal
+  it("limite conta só sociais: cap em 1 social, troca livre; used reflete sociais", async () => {
+    const t = await provisionTenant(sql, "start") // limite = 1 canal social
     const { POST, DELETE, GET } = await import("@/app/api/v1/channels/route")
     const tok = await token(t, { role: "owner" })
 
-    expect((await POST(req("POST", "/api/v1/channels", tok, { platform: "blog" }))).status).toBe(200)
-    // slot cheio: um segundo canal é barrado (409)
+    // 1º social ok; 2º social barrado (409, cap = 1).
+    expect((await POST(req("POST", "/api/v1/channels", tok, { platform: "instagram", credentials: "c" }))).status).toBe(200)
     expect(
       (await POST(req("POST", "/api/v1/channels", tok, { platform: "linkedin", credentials: "tok" }))).status,
     ).toBe(409)
-    // desconecta o blog → libera o slot
-    expect((await DELETE(req("DELETE", "/api/v1/channels", tok, { platform: "blog" }))).status).toBe(200)
+    // Troca livre: desconecta o instagram → libera o slot social.
+    expect((await DELETE(req("DELETE", "/api/v1/channels", tok, { platform: "instagram" }))).status).toBe(200)
     expect(
       (await POST(req("POST", "/api/v1/channels", tok, { platform: "linkedin", credentials: "tok" }))).status,
     ).toBe(200)
 
-    const list = (await (await GET(req("GET", "/api/v1/channels", tok))).json()) as {
+    const s = (await (await GET(req("GET", "/api/v1/channels", tok))).json()) as {
+      used: number
+      limit: number
       channels: { platform: string }[]
     }
-    const platforms = list.channels.map((c) => c.platform)
-    expect(platforms).toContain("linkedin")
-    expect(platforms).not.toContain("blog")
+    expect(s.used).toBe(1) // só o linkedin (social)
+    expect(s.limit).toBe(1)
+    expect(s.channels.map((c) => c.platform)).toContain("linkedin")
+  })
+
+  it("blog/wordpress/webhook não entram na contagem e nunca são barrados", async () => {
+    const t = await provisionTenant(sql, "start") // limite = 1 canal social
+    const { POST, GET } = await import("@/app/api/v1/channels/route")
+    const tok = await token(t, { role: "owner" })
+
+    // Preenche o slot social e ainda assim conecta blog + webhook (não contam).
+    expect((await POST(req("POST", "/api/v1/channels", tok, { platform: "instagram", credentials: "c" }))).status).toBe(200)
+    expect((await POST(req("POST", "/api/v1/channels", tok, { platform: "blog" }))).status).toBe(200)
+    expect(
+      (await POST(req("POST", "/api/v1/channels", tok, { platform: "webhook", credentials: JSON.stringify({ url: "https://x", secret: "s" }) }))).status,
+    ).toBe(200)
+
+    const s = (await (await GET(req("GET", "/api/v1/channels", tok))).json()) as { used: number }
+    expect(s.used).toBe(1) // só o instagram conta, apesar de blog+webhook conectados
   })
 
   it("catálogo: X/Threads fora de setup.available e conectar responde 400", async () => {

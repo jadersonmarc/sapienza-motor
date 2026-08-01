@@ -247,10 +247,12 @@ maybe("motor data plane", () => {
     await expect(regenerate(sql, t, item.id, gen)).rejects.toBeInstanceOf(RegenLimitError)
   })
 
-  it("canais por tier: start (1) bloqueia o 2º canal", async () => {
+  it("canais por tier: start (1) bloqueia o 2º SOCIAL; blog não conta", async () => {
     const t = await provisionTenant(sql, "start")
+    // blog não entra na contagem: não ocupa o slot social.
     await connectChannel(sql, t, "blog")
-    await expect(connectChannel(sql, t, "instagram")).rejects.toBeInstanceOf(ChannelLimitError)
+    await connectChannel(sql, t, "instagram") // 1º social ok
+    await expect(connectChannel(sql, t, "linkedin")).rejects.toBeInstanceOf(ChannelLimitError) // 2º social barrado
   })
 
   it("publica só nos canais do formato: peça de blog não vaza p/ social", async () => {

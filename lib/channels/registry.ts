@@ -6,6 +6,7 @@ import { contentTransition } from "@/lib/content/transition"
 import { emitContentPublishFailed } from "@/lib/platform/events"
 import { assertPublishAllowed } from "@/lib/content/quota"
 import type { Channel, Platform } from "./types"
+import { isCounted } from "./types"
 import {
   BlogChannel,
   InstagramChannel,
@@ -149,11 +150,16 @@ export async function connectChannel(
   const enc = credentials ? encryptSecret(credentials) : null
   await withTenant(sql, tenantId, async (tx) => {
     const enabled = (await tx`SELECT platform FROM motor_channels WHERE enabled = true`) as unknown as {
-      platform: string
+      platform: Platform
     }[]
     const already = enabled.some((c) => c.platform === platform)
-    if (!already && enabled.length >= limit) {
-      throw new ChannelLimitError(`plano permite ${limit} canal(is); desconecte um para adicionar outro`)
+    // Só canais SOCIAIS contam no limite; blog/wordpress/webhook são encanamento
+    // (inclusos em todos os planos) e nunca são bloqueados.
+    const socialUsed = enabled.filter((c) => isCounted(c.platform)).length
+    if (!already && isCounted(platform) && socialUsed >= limit) {
+      throw new ChannelLimitError(
+        `seu plano permite ${limit} canal(is) social(is). Desconecte um para trocar, ou faça upgrade para conectar mais.`,
+      )
     }
     await tx`
       INSERT INTO motor_channels (platform, credentials_enc, enabled)
