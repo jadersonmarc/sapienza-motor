@@ -3,6 +3,7 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { channelLimit } from "@/lib/platform/gating"
 import { encryptSecret, decryptSecret } from "@/lib/platform/crypto"
 import { contentTransition } from "@/lib/content/transition"
+import { emitContentPublishFailed } from "@/lib/platform/events"
 import { assertPublishAllowed } from "@/lib/content/quota"
 import type { Channel, Platform } from "./types"
 import {
@@ -66,6 +67,63 @@ export class PartialPublishError extends Error {
   ) {
     super(`publicado em ${published.length} canal(is); falhou em: ${failures.map((f) => `${f.platform} (${f.error})`).join(", ")}`)
     this.name = "PartialPublishError"
+  }
+}
+
+// Estado por canal na peça (social_drafts). Um canal tem no máximo uma linha de
+// resultado corrente: gravar 'sent' apaga a 'failed' anterior e vice-versa, então o
+// que está no banco reflete a realidade atual (não acumula histórico de tentativas).
+async function recordSent(
+  sql: Sql,
+  tenantId: string,
+  itemId: string,
+  platform: Platform,
+  body: string,
+  imageUrl: string | undefined,
+  url: string,
+): Promise<void> {
+  await withTenant(sql, tenantId, async (tx) => {
+    await tx`DELETE FROM social_drafts WHERE content_item_id = ${itemId} AND platform = ${platform} AND status = 'failed'`
+    await tx`
+      INSERT INTO social_drafts (content_item_id, platform, body, status, image_url, post_url)
+      VALUES (${itemId}, ${platform}, ${body}, 'sent', ${imageUrl ?? null}, ${url})
+    `
+  })
+}
+
+async function recordFailed(
+  sql: Sql,
+  tenantId: string,
+  itemId: string,
+  platform: Platform,
+  body: string,
+  imageUrl: string | undefined,
+  error: string,
+): Promise<void> {
+  await withTenant(sql, tenantId, async (tx) => {
+    await tx`DELETE FROM social_drafts WHERE content_item_id = ${itemId} AND platform = ${platform} AND status = 'failed'`
+    await tx`
+      INSERT INTO social_drafts (content_item_id, platform, body, status, image_url, last_error)
+      VALUES (${itemId}, ${platform}, ${body}, 'failed', ${imageUrl ?? null}, ${error})
+    `
+  })
+}
+
+// Emite ContentPublishFailed no outbox (o core notifica o cliente). Best-effort: um
+// erro ao notificar não pode mascarar/reverter a falha de publicação que a gerou.
+async function notifyPublishFailed(
+  sql: Sql,
+  tenantId: string,
+  itemId: string,
+  title: string,
+  failures: { platform: Platform; error: string }[],
+): Promise<void> {
+  try {
+    await withTenant(sql, tenantId, (tx) =>
+      emitContentPublishFailed(tx, { tenantId, itemId, title, failures }),
+    )
+  } catch (e) {
+    console.error(`[publish] falha ao emitir ContentPublishFailed (peça ${itemId}):`, e)
   }
 }
 
@@ -223,17 +281,14 @@ export async function publishItem(
     try {
       const { url } = await driver.publish({ slug, title, body: channelBody, imageUrl, videoUrl }, creds)
       results.push({ platform: ch.platform, url })
-      await withTenant(sql, tenantId, async (tx) => {
-        await tx`
-          INSERT INTO social_drafts (content_item_id, platform, body, status, image_url, post_url)
-          VALUES (${itemId}, ${ch.platform}, ${channelBody}, 'sent', ${imageUrl ?? null}, ${url})
-        `
-      })
+      await recordSent(sql, tenantId, itemId, ch.platform, channelBody, imageUrl, url)
     } catch (e) {
       // Um canal fora do ar não pode impedir a transição dos que publicaram —
       // sem isto a peça ficaria com published_at NULL e o cron a repostaria nos
       // canais bem-sucedidos a cada ciclo, indefinidamente.
-      failures.push({ platform: ch.platform, error: e instanceof Error ? e.message : String(e) })
+      const error = e instanceof Error ? e.message : String(e)
+      failures.push({ platform: ch.platform, error })
+      await recordFailed(sql, tenantId, itemId, ch.platform, channelBody, imageUrl, error)
     }
   }
 
@@ -241,12 +296,16 @@ export async function publishItem(
   // fatura — o retry do cron tenta a peça inteira de novo. (Sem canal algum
   // habilitado não é falha: a peça publica e fatura, como sempre fez.)
   if (results.length === 0 && failures.length > 0) {
+    await notifyPublishFailed(sql, tenantId, itemId, title, failures)
     throw new PartialPublishError([], failures)
   }
 
   // Uma peça publicada = 1 unidade faturável (independe de nº de canais).
   await contentTransition(sql, tenantId, itemId, "published")
-  if (failures.length > 0) throw new PartialPublishError(results, failures)
+  if (failures.length > 0) {
+    await notifyPublishFailed(sql, tenantId, itemId, title, failures)
+    throw new PartialPublishError(results, failures)
+  }
   return results
 }
 
@@ -336,14 +395,11 @@ export async function retryFailedChannels(
         creds,
       )
       published.push({ platform: ch.platform, url })
-      await withTenant(sql, tenantId, async (tx) => {
-        await tx`
-          INSERT INTO social_drafts (content_item_id, platform, body, status, image_url, post_url)
-          VALUES (${itemId}, ${ch.platform}, ${channelBody}, 'sent', ${imageUrl ?? null}, ${url})
-        `
-      })
+      await recordSent(sql, tenantId, itemId, ch.platform, channelBody, imageUrl, url)
     } catch (e) {
-      failures.push({ platform: ch.platform, error: e instanceof Error ? e.message : String(e) })
+      const error = e instanceof Error ? e.message : String(e)
+      failures.push({ platform: ch.platform, error })
+      await recordFailed(sql, tenantId, itemId, ch.platform, channelBody, imageUrl, error)
     }
   }
   return { published, failures }

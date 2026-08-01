@@ -27,6 +27,30 @@ export async function emitUsageRecorded(tx: Tx, args: EmitArgs): Promise<void> {
   `
 }
 
+type PublishFailedArgs = {
+  tenantId: string
+  itemId: string
+  title: string
+  failures: { platform: string; error: string }[]
+}
+
+/** Append de ContentPublishFailed no outbox: uma peça terminou a publicação com um
+ *  ou mais canais falhos. O core consome e notifica o cliente (falha silenciosa é o
+ *  pior modo neste produto). Mesmo append sancionado em public do emitUsageRecorded. */
+export async function emitContentPublishFailed(tx: Tx, args: PublishFailedArgs): Promise<void> {
+  const payload = {
+    tenant_id: args.tenantId,
+    produto: PRODUTO,
+    item_id: args.itemId,
+    title: args.title,
+    failures: args.failures,
+  }
+  await tx`
+    INSERT INTO public.event_outbox (type, tenant_id, produto, payload)
+    VALUES ('ContentPublishFailed', ${args.tenantId}::uuid, ${PRODUTO}, ${tx.json(payload)})
+  `
+}
+
 export type OutboxEvent = {
   id: number
   type: string

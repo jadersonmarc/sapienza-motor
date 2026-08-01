@@ -293,6 +293,24 @@ maybe("motor data plane", () => {
     expect(blog.published).toHaveLength(1)
     expect(await usage(sql, t, "peca")).toBe(1)
 
+    // Estado por canal: webhook fica 'failed' com o erro; blog fica 'sent'.
+    const stateAfterFirst = (await withTenant(sql, t, (tx) =>
+      tx`SELECT platform, status, last_error FROM social_drafts WHERE content_item_id = ${item.id} ORDER BY platform`,
+    )) as unknown as { platform: string; status: string; last_error: string | null }[]
+    const webhookRow = stateAfterFirst.find((r) => r.platform === "webhook")!
+    expect(webhookRow.status).toBe("failed")
+    expect(webhookRow.last_error).toContain("webhook fora do ar")
+    expect(stateAfterFirst.find((r) => r.platform === "blog")!.status).toBe("sent")
+
+    // Notificação: emitiu ContentPublishFailed no outbox (o core avisa o cliente).
+    const [ev] = (await sql`
+      SELECT payload FROM public.event_outbox
+       WHERE type = 'ContentPublishFailed' AND tenant_id = ${t}::uuid
+    `) as unknown as { payload: { item_id: string; failures: { platform: string }[] } }[]
+    expect(ev).toBeTruthy()
+    expect(ev.payload.item_id).toBe(item.id)
+    expect(ev.payload.failures.map((f) => f.platform)).toEqual(["webhook"])
+
     // Retry: webhook agora funciona; blog é pulado (já saiu). Não re-fatura.
     const blog2 = new MockChannel("blog")
     const webhook2 = new MockChannel("webhook")
@@ -303,6 +321,12 @@ maybe("motor data plane", () => {
     expect(blog2.published).toHaveLength(0) // não republica o que já saiu
     expect(webhook2.published).toHaveLength(1)
     expect(await usage(sql, t, "peca")).toBe(1) // billing intacto
+
+    // Sucesso no retry apaga o 'failed': webhook agora está 'sent', sem falha pendente.
+    const stateAfterRetry = (await withTenant(sql, t, (tx) =>
+      tx`SELECT status FROM social_drafts WHERE content_item_id = ${item.id} AND platform = 'webhook'`,
+    )) as unknown as { status: string }[]
+    expect(stateAfterRetry.map((r) => r.status)).toEqual(["sent"])
   })
 
   it("publishItem: publica no canal (mock) e fatura 1 peça", async () => {
