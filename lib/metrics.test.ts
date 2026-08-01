@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest"
+import { describe, it, expect, beforeAll, afterAll, vi, afterEach } from "vitest"
 import { randomUUID } from "node:crypto"
 import { testSql, setupControlPlane, provisionTenant, dropTenants } from "@/lib/testutil"
 import { withTenant } from "@/lib/platform/tenancy"
@@ -12,6 +12,7 @@ import {
   upsertPostMetrics,
   topPostsForPeriod,
   byConfigForPeriod,
+  metricsAdapterFor,
   type MetricsAdapter,
   type PostMetrics,
 } from "@/lib/metrics"
@@ -24,7 +25,48 @@ describe("parsePostId", () => {
     expect(parsePostId("instagram", "https://www.instagram.com/p/ABC123")).toBe("ABC123")
     expect(parsePostId("twitter", "https://x.com/sapienza/status/99")).toBe("99")
     expect(parsePostId("facebook", "https://www.facebook.com/42_9")).toBe("42_9")
+    expect(parsePostId("linkedin", "https://www.linkedin.com/feed/update/urn:li:share:9")).toBe("urn:li:share:9")
     expect(parsePostId("blog", "https://x/y")).toBeNull()
+  })
+})
+
+// FacebookMetricsAdapter — puro (fetch mockado). Impressões/alcance dos insights;
+// curtidas/comentários/compart. do objeto (summary).
+describe("FacebookMetricsAdapter", () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it("combina insights + objeto num único PostMetrics", async () => {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u.includes("/insights"))
+        return new Response(
+          JSON.stringify({
+            data: [
+              { name: "post_impressions", values: [{ value: 500 }] },
+              { name: "post_impressions_unique", values: [{ value: 420 }] },
+            ],
+          }),
+          { status: 200 },
+        )
+      return new Response(
+        JSON.stringify({
+          likes: { summary: { total_count: 30 } },
+          comments: { summary: { total_count: 7 } },
+          shares: { count: 4 },
+        }),
+        { status: 200 },
+      )
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const adapter = metricsAdapterFor("facebook")!
+    const m = await adapter.fetchPost("42_9", JSON.stringify({ access_token: "t", page_id: "42" }))
+    expect(m).toEqual({ impressions: 500, reach: 420, likes: 30, comments: 7, shares: 4 })
+  })
+
+  it("sem credenciais, é no-op (null)", async () => {
+    expect(await metricsAdapterFor("facebook")!.fetchPost("42_9", null)).toBeNull()
+  })
+
+  it("linkedin não tem adapter (perfil pessoal não expõe métrica por post)", () => {
+    expect(metricsAdapterFor("linkedin")).toBeNull()
   })
 })
 

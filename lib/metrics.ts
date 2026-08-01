@@ -42,6 +42,11 @@ export function parsePostId(platform: Platform, url: string): string | null {
       case "facebook":
       case "threads":
         return seg.at(-1) ?? null
+      case "linkedin":
+        // .../feed/update/urn:li:share:9 — o URN é o último segmento. Serve p/
+        // reconhecer o post, mas perfil pessoal não expõe métrica por post via API
+        // (não há adapter de linkedin — coleta é no-op). Ver CHANNELS.md.
+        return seg.at(-1) ?? null
       default:
         return null
     }
@@ -75,10 +80,48 @@ class InstagramMetricsAdapter implements MetricsAdapter {
   }
 }
 
-// Registro de adapters. Só canais com coleta real entram aqui — os demais são
-// no-op até a validação/credenciais do Bloco C.
+class FacebookMetricsAdapter implements MetricsAdapter {
+  readonly platform: Platform = "facebook"
+  async fetchPost(nativeId: string, credentials: string | null): Promise<PostMetrics | null> {
+    if (!credentials) return null
+    const { access_token } = JSON.parse(credentials) as { access_token: string }
+    const base = "https://graph.facebook.com/v21.0"
+    const tok = encodeURIComponent(access_token)
+    // Impressões/alcance vêm dos insights do post; curtidas/comentários/compart. do
+    // próprio objeto (summary). Duas chamadas — a de objeto não é insight.
+    const [insRes, objRes] = await Promise.all([
+      fetch(`${base}/${nativeId}/insights?metric=post_impressions,post_impressions_unique&access_token=${tok}`, {
+        signal: AbortSignal.timeout(20000),
+      }),
+      fetch(`${base}/${nativeId}?fields=likes.summary(true),comments.summary(true),shares&access_token=${tok}`, {
+        signal: AbortSignal.timeout(20000),
+      }),
+    ])
+    if (!insRes.ok) throw new Error(`facebook insights: ${insRes.status} ${await insRes.text().catch(() => "")}`)
+    if (!objRes.ok) throw new Error(`facebook post: ${objRes.status} ${await objRes.text().catch(() => "")}`)
+    const ins = (await insRes.json()) as { data?: { name: string; values?: { value: number }[] }[] }
+    const iv = (name: string) => ins.data?.find((d) => d.name === name)?.values?.[0]?.value
+    const obj = (await objRes.json()) as {
+      likes?: { summary?: { total_count?: number } }
+      comments?: { summary?: { total_count?: number } }
+      shares?: { count?: number }
+    }
+    return {
+      impressions: iv("post_impressions"),
+      reach: iv("post_impressions_unique"),
+      likes: obj.likes?.summary?.total_count,
+      comments: obj.comments?.summary?.total_count,
+      shares: obj.shares?.count,
+    }
+  }
+}
+
+// Registro de adapters. Só canais com coleta real por POST entram aqui; os demais
+// são no-op. LinkedIn fica de fora de propósito: post de perfil pessoal não expõe
+// métrica por post via API (ver CHANNELS.md) — não fingimos dado.
 const ADAPTERS: Partial<Record<Platform, MetricsAdapter>> = {
   instagram: new InstagramMetricsAdapter(),
+  facebook: new FacebookMetricsAdapter(),
 }
 
 export function metricsAdapterFor(platform: Platform): MetricsAdapter | null {
