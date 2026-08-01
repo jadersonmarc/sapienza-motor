@@ -203,4 +203,57 @@ export async function statsForPeriod(sql: Sql, tenantId: string, period: string)
   })
 }
 
+export type TopPost = {
+  slug: string
+  title: string | null
+  pilar: string | null
+  format: string
+  impressions: number
+  likes: number
+  comments: number
+}
+
+/** Melhores posts do período por impressões (junta o título da revisão atual). */
+export async function topPostsForPeriod(sql: Sql, tenantId: string, period: string, limit = 5): Promise<TopPost[]> {
+  const lim = Math.min(Math.max(1, Math.trunc(limit)), 20)
+  return withTenant(sql, tenantId, async (tx) => {
+    return (await tx`
+      SELECT ci.slug, cr.title AS title, ci.pilar AS pilar, ci.format AS format,
+             COALESCE(sum(pm.impressions),0)::int AS impressions,
+             COALESCE(sum(pm.likes),0)::int AS likes,
+             COALESCE(sum(pm.comments),0)::int AS comments
+        FROM post_metrics pm
+        JOIN content_items ci ON ci.id = pm.content_item_id
+        LEFT JOIN content_revisions cr ON cr.id = ci.current_revision_id
+       WHERE to_char(pm.day, 'YYYY-MM') = ${period}
+       GROUP BY ci.id, ci.slug, cr.title, ci.pilar, ci.format
+       ORDER BY impressions DESC LIMIT ${lim}
+    `) as unknown as TopPost[]
+  })
+}
+
+export type ByConfigRow = {
+  config_version: number | null
+  posts: number
+  impressions: number
+  avg_impressions: number
+}
+
+/** Desempenho agrupado por config_version — correlaciona COMO a peça foi gerada
+ *  (versão da config do agente) com o resultado. */
+export async function byConfigForPeriod(sql: Sql, tenantId: string, period: string): Promise<ByConfigRow[]> {
+  return withTenant(sql, tenantId, async (tx) => {
+    return (await tx`
+      SELECT ci.config_version AS config_version,
+             COUNT(DISTINCT pm.content_item_id)::int AS posts,
+             COALESCE(sum(pm.impressions),0)::int AS impressions,
+             COALESCE(round(avg(pm.impressions)),0)::int AS avg_impressions
+        FROM post_metrics pm
+        JOIN content_items ci ON ci.id = pm.content_item_id
+       WHERE to_char(pm.day, 'YYYY-MM') = ${period}
+       GROUP BY ci.config_version ORDER BY ci.config_version
+    `) as unknown as ByConfigRow[]
+  })
+}
+
 export { currentPeriod }

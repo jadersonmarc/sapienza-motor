@@ -5,8 +5,17 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { createItem } from "@/lib/content/store"
 import { getEditorConfig, upsertEditorConfig, type EditorConfig } from "@/lib/content/editor-config"
 import { connectChannel } from "@/lib/channels/registry"
-import { collectMetrics, statsForPeriod, parsePostId, type MetricsAdapter, type PostMetrics } from "@/lib/metrics"
-import { currentPeriod } from "@/lib/platform/period"
+import {
+  collectMetrics,
+  statsForPeriod,
+  parsePostId,
+  upsertPostMetrics,
+  topPostsForPeriod,
+  byConfigForPeriod,
+  type MetricsAdapter,
+  type PostMetrics,
+} from "@/lib/metrics"
+import { currentPeriod, currentDay } from "@/lib/platform/period"
 import type { Sql } from "@/lib/db"
 
 // parsePostId é puro — roda sempre.
@@ -95,5 +104,31 @@ maybe("métricas (série temporal)", () => {
     expect(stats.totals.posts).toBe(1)
     expect(stats.series).toHaveLength(1)
     expect(stats.byPillar[0]).toMatchObject({ pilar: "p1", posts: 1 })
+  })
+
+  it("top posts (ordenado) e by-config (correlaciona geração×resultado)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const day = currentDay()
+
+    // Peça A gerada na config v1
+    await withTenant(sql, t, (tx) => upsertEditorConfig(tx, cfg({ system_prompt: "v1" })))
+    const a = await withTenant(sql, t, (tx) => createItem(tx, { slug: `a-${randomUUID()}`, title: "Post A", bodyMarkdown: "c", format: "instagram", pilar: "p1" }))
+    // Peça B gerada na config v2 (bump)
+    await withTenant(sql, t, (tx) => upsertEditorConfig(tx, cfg({ system_prompt: "v2" })))
+    const b = await withTenant(sql, t, (tx) => createItem(tx, { slug: `b-${randomUUID()}`, title: "Post B", bodyMarkdown: "c", format: "instagram", pilar: "p2" }))
+
+    await withTenant(sql, t, async (tx) => {
+      await upsertPostMetrics(tx, { contentItemId: a.id, platform: "instagram", day, metrics: { impressions: 50, likes: 3, comments: 1 } })
+      await upsertPostMetrics(tx, { contentItemId: b.id, platform: "instagram", day, metrics: { impressions: 200, likes: 20, comments: 5 } })
+    })
+
+    const top = await topPostsForPeriod(sql, t, currentPeriod(), 5)
+    expect(top.map((p) => p.title)).toEqual(["Post B", "Post A"]) // B tem mais impressões
+    expect(top[0]).toMatchObject({ impressions: 200, pilar: "p2" })
+
+    const byConfig = await byConfigForPeriod(sql, t, currentPeriod())
+    expect(byConfig).toHaveLength(2) // v1 e v2
+    const v2 = byConfig.find((r) => r.config_version === 2)!
+    expect(v2).toMatchObject({ posts: 1, impressions: 200 })
   })
 })
