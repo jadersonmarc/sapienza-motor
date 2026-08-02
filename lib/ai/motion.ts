@@ -66,10 +66,10 @@ function composeSystem(brief: MotionBrief, allowStat: boolean): string {
     "\n\nO vídeo é um ROTEIRO curto com abertura (HOOK), meio e CHAMADA final (CTA). Primeiro escolha o " +
     "ARQUÉTIPO que melhor conta este conteúdo:\n" +
     "- highlight: um destaque único (manchete/citação/lista/dado). O padrão quando não há estrutura clara.\n" +
-    "- list: uma sequência de 2 a 5 passos/itens curtos (preencha `list.items`).\n" +
-    "- myth_fact: desfaz um engano — um mito e a verdade (preencha `mythFact.myth` e `mythFact.fact`).\n" +
-    "- before_after: contraste antes/depois (preencha `beforeAfter.before` e `beforeAfter.after`).\n" +
-    "- qa: uma pergunta que o público faz e a resposta (preencha `qa.question` e `qa.answer`).\n" +
+    "- list: uma sequência de 2 a 5 passos/itens curtos (preencha `list_items`).\n" +
+    "- myth_fact: desfaz um engano — um mito e a verdade (preencha `myth` e `fact`).\n" +
+    "- before_after: contraste antes/depois (preencha `before` e `after`).\n" +
+    "- qa: uma pergunta que o público faz e a resposta (preencha `question` e `answer`).\n" +
     "\nSempre preencha também o preset de DESENVOLVIMENTO (usado no arquétipo `highlight` e como " +
     "reserva se faltar conteúdo do arquétipo). Escolha o preset que melhor representa o conteúdo:\n" +
     "- headline: uma manchete forte (poucas palavras), com UMA palavra a destacar.\n" +
@@ -85,8 +85,8 @@ function composeSystem(brief: MotionBrief, allowStat: boolean): string {
   }
   s +=
     "\nAlém do desenvolvimento, devolva:\n" +
-    "- `hook`: 2 a 5 palavras de abertura que fisguem a atenção (não repita a manchete literalmente).\n" +
-    "- `cta`: uma chamada final curta e específica (ex.: 'Fale com a gente', 'Saiba mais'), sem link.\n" +
+    "- `hook_words`: 2 a 5 palavras de abertura que fisguem a atenção (não repita a manchete literalmente).\n" +
+    "- `cta_text`: uma chamada final curta e específica (ex.: 'Fale com a gente', 'Saiba mais'), sem link.\n" +
     "- `theme`: 'ink' (fundo escuro) ou 'surface' (fundo claro) — escolha o que combina com o tema.\n" +
     "- `audio`: clima da trilha — 'calm' (sóbrio/institucional), 'upbeat' (dinâmico/varejo), 'bold' " +
     "(impactante) ou 'none' (sem trilha). Escolha o que combina com o conteúdo.\n" +
@@ -95,12 +95,17 @@ function composeSystem(brief: MotionBrief, allowStat: boolean): string {
   return s
 }
 
+// Schema ACHATADO de propósito: campos de arquétipo/hook/cta como escalares/arrays
+// no topo (não objetos aninhados) e SEM `additionalProperties`/`required` aninhados.
+// Grammar-constrained decoding (output_config.json_schema) compila o schema numa
+// gramática; muitos objetos aninhados + additionalProperties:false estouravam a
+// compilação ("Grammar compilation timed out"). Achatar mantém a geração barata.
 function schemaFor(allowStat: boolean) {
   const presets = allowStat ? MOTION_PRESETS : (["headline", "quote", "slides"] as const)
+  const strArray = (description: string) => ({ type: "array", items: { type: "string" }, description })
   return {
     type: "object",
-    additionalProperties: false,
-    required: ["preset", "archetype", "aspect", "title", "caption", "hook", "cta"],
+    required: ["preset", "archetype", "aspect", "title", "caption"],
     properties: {
       preset: { type: "string", enum: [...presets] },
       archetype: { type: "string", enum: [...MOTION_ARCHETYPES], description: "estrutura do roteiro" },
@@ -109,57 +114,27 @@ function schemaFor(allowStat: boolean) {
       caption: { type: "string", description: "Legenda pronta para publicar" },
       theme: { type: "string", enum: ["ink", "surface"], description: "fundo escuro (ink) ou claro (surface)" },
       audio: { type: "string", enum: [...MOTION_MOODS], description: "clima da trilha (none = sem trilha)" },
-      list: {
-        type: "object",
-        additionalProperties: false,
-        required: ["items"],
-        properties: { items: { type: "array", items: { type: "string" }, description: "2 a 5 passos/itens curtos" } },
-      },
-      mythFact: {
-        type: "object",
-        additionalProperties: false,
-        required: ["myth", "fact"],
-        properties: { myth: { type: "string", description: "o engano comum" }, fact: { type: "string", description: "a verdade" } },
-      },
-      beforeAfter: {
-        type: "object",
-        additionalProperties: false,
-        required: ["before", "after"],
-        properties: { before: { type: "string" }, after: { type: "string" } },
-      },
-      qa: {
-        type: "object",
-        additionalProperties: false,
-        required: ["question", "answer"],
-        properties: { question: { type: "string" }, answer: { type: "string" } },
-      },
-      hook: {
-        type: "object",
-        additionalProperties: false,
-        required: ["words"],
-        properties: {
-          words: { type: "array", items: { type: "string" }, description: "2–5 palavras de abertura" },
-        },
-      },
-      cta: {
-        type: "object",
-        additionalProperties: false,
-        required: ["text"],
-        properties: { text: { type: "string", description: "chamada final curta (sem link)" } },
-      },
+      // Abertura + chamada (achatados).
+      hook_words: strArray("2–5 palavras de abertura"),
+      cta_text: { type: "string", description: "chamada final curta (sem link)" },
+      // Conteúdo por arquétipo (achatado — preencha só o do arquétipo escolhido).
+      list_items: strArray("archetype list: 2 a 5 passos/itens curtos"),
+      myth: { type: "string", description: "archetype myth_fact: o engano" },
+      fact: { type: "string", description: "archetype myth_fact: a verdade" },
+      before: { type: "string", description: "archetype before_after: o antes" },
+      after: { type: "string", description: "archetype before_after: o depois" },
+      question: { type: "string", description: "archetype qa: a pergunta" },
+      answer: { type: "string", description: "archetype qa: a resposta" },
+      // Desenvolvimento (usado no highlight e como reserva).
       headline: {
         type: "object",
-        additionalProperties: false,
-        required: ["words", "highlightIndex"],
         properties: {
-          words: { type: "array", items: { type: "string" }, description: "3–6 palavras da manchete" },
+          words: strArray("3–6 palavras da manchete"),
           highlightIndex: { type: "number", description: "índice (0-based) da palavra a destacar" },
         },
       },
       quote: {
         type: "object",
-        additionalProperties: false,
-        required: ["quote", "keyphrase", "author"],
         properties: {
           quote: { type: "string" },
           keyphrase: { type: "string", description: "trecho da citação a destacar (substring da citação)" },
@@ -168,17 +143,10 @@ function schemaFor(allowStat: boolean) {
       },
       slides: {
         type: "object",
-        additionalProperties: false,
-        required: ["slides"],
         properties: {
           slides: {
             type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["index", "title"],
-              properties: { index: { type: "number" }, title: { type: "string" } },
-            },
+            items: { type: "object", properties: { index: { type: "number" }, title: { type: "string" } } },
             description: "2 a 4 slides",
           },
         },
@@ -187,8 +155,6 @@ function schemaFor(allowStat: boolean) {
         ? {
             stat: {
               type: "object",
-              additionalProperties: false,
-              required: ["label", "value", "suffix", "subtitle", "source"],
               properties: {
                 label: { type: "string" },
                 value: { type: "number" },
@@ -211,12 +177,15 @@ type RawMotion = {
   caption: string
   theme?: MotionField
   audio?: MotionMood
-  hook?: { words: string[] }
-  cta?: { text: string }
-  list?: { items: string[] }
-  mythFact?: { myth: string; fact: string }
-  beforeAfter?: { before: string; after: string }
-  qa?: { question: string; answer: string }
+  hook_words?: string[]
+  cta_text?: string
+  list_items?: string[]
+  myth?: string
+  fact?: string
+  before?: string
+  after?: string
+  question?: string
+  answer?: string
   headline?: { words: string[]; highlightIndex: number }
   quote?: { quote: string; keyphrase: string; author: string }
   slides?: { slides: { index: number; title: string }[] }
@@ -281,17 +250,20 @@ function stmt(role: MotionScene["role"], label: string | undefined, text: string
 export function buildStory(
   archetype: MotionArchetype,
   develop: SceneBlock,
-  raw: Pick<RawMotion, "hook" | "cta" | "theme" | "audio" | "list" | "mythFact" | "beforeAfter" | "qa">,
+  raw: Pick<
+    RawMotion,
+    "hook_words" | "cta_text" | "theme" | "audio" | "list_items" | "myth" | "fact" | "before" | "after" | "question" | "answer"
+  >,
   prompt: string,
 ): StoryProps {
-  const hookWords = (raw.hook?.words ?? []).map((w) => w.trim()).filter(Boolean).slice(0, 5)
+  const hookWords = (raw.hook_words ?? []).map((w) => w.trim()).filter(Boolean).slice(0, 5)
   const fallbackHook = (prompt.trim().split(/\s+/).filter(Boolean).slice(0, 4).join(" ") || "Sapienza").split(/\s+/)
   const hookScene: MotionScene = {
     role: "hook",
     durSec: HOOK_SEC,
     block: { kind: "headline", words: hookWords.length >= 2 ? hookWords : fallbackHook, highlightIndex: 0 },
   }
-  const ctaScene: MotionScene = { role: "cta", durSec: CTA_SEC, block: { kind: "cta", text: clean(raw.cta?.text) || "Fale com a gente" } }
+  const ctaScene: MotionScene = { role: "cta", durSec: CTA_SEC, block: { kind: "cta", text: clean(raw.cta_text) || "Fale com a gente" } }
   const theme: MotionField = raw.theme === "surface" ? "surface" : "ink"
   const developScene: MotionScene = { role: "develop", durSec: developSec(develop), block: develop }
 
@@ -300,21 +272,21 @@ export function buildStory(
   let middle: MotionScene[] = [developScene]
 
   if (archetype === "list") {
-    const items = (raw.list?.items ?? []).map(clean).filter(Boolean).slice(0, 5)
+    const items = (raw.list_items ?? []).map(clean).filter(Boolean).slice(0, 5)
     if (items.length >= 2) {
       middle = items.map((t, i) => stmt("develop", `${String(i + 1).padStart(2, "0")}`, t, 1.8))
     }
   } else if (archetype === "myth_fact") {
-    const myth = clean(raw.mythFact?.myth)
-    const fact = clean(raw.mythFact?.fact)
+    const myth = clean(raw.myth)
+    const fact = clean(raw.fact)
     if (myth && fact) middle = [stmt("develop", "Mito", myth, 2.4), stmt("develop", "Verdade", fact, 2.6)]
   } else if (archetype === "before_after") {
-    const before = clean(raw.beforeAfter?.before)
-    const after = clean(raw.beforeAfter?.after)
+    const before = clean(raw.before)
+    const after = clean(raw.after)
     if (before && after) middle = [stmt("develop", "Antes", before, 2.4), stmt("develop", "Depois", after, 2.6)]
   } else if (archetype === "qa") {
-    const q = clean(raw.qa?.question)
-    const a = clean(raw.qa?.answer)
+    const q = clean(raw.question)
+    const a = clean(raw.answer)
     if (q && a) {
       lead = stmt("hook", "Pergunta", q, 2.2)
       middle = [stmt("develop", "Resposta", a, 2.8)]

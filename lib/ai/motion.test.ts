@@ -63,7 +63,7 @@ describe("motion — buildStory (montagem do roteiro por arquétipo)", () => {
   })
 
   it("usa hook/cta/theme do modelo quando presentes", () => {
-    const s = buildStory("highlight", develop, { hook: { words: ["Perca", "menos", "leads"] }, cta: { text: "Saiba mais" }, theme: "surface" }, "x")
+    const s = buildStory("highlight", develop, { hook_words: ["Perca", "menos", "leads"], cta_text: "Saiba mais", theme: "surface" }, "x")
     expect(s.scenes[0].block).toMatchObject({ kind: "headline", words: ["Perca", "menos", "leads"] })
     expect(s.scenes[2].block).toMatchObject({ kind: "cta", text: "Saiba mais" })
     expect(s.theme).toBe("surface")
@@ -71,7 +71,7 @@ describe("motion — buildStory (montagem do roteiro por arquétipo)", () => {
   })
 
   it("list: uma cena statement numerada por item, entre hook e CTA", () => {
-    const s = buildStory("list", develop, { list: { items: ["Capte o lead", "Responda na hora", "Feche a venda"] } }, "x")
+    const s = buildStory("list", develop, { list_items: ["Capte o lead", "Responda na hora", "Feche a venda"] }, "x")
     expect(s.scenes.map((x) => x.role)).toEqual(["hook", "develop", "develop", "develop", "cta"])
     const items = s.scenes.filter((x) => x.role === "develop")
     expect(items.every((x) => x.block.kind === "statement")).toBe(true)
@@ -80,7 +80,7 @@ describe("motion — buildStory (montagem do roteiro por arquétipo)", () => {
   })
 
   it("myth_fact: dois statements rotulados Mito/Verdade", () => {
-    const s = buildStory("myth_fact", develop, { mythFact: { myth: "IA substitui o time", fact: "IA devolve o tempo do time" } }, "x")
+    const s = buildStory("myth_fact", develop, { myth: "IA substitui o time", fact: "IA devolve o tempo do time" }, "x")
     const mid = s.scenes.filter((x) => x.role === "develop")
     expect(mid.map((x) => (x.block as { label?: string }).label)).toEqual(["Mito", "Verdade"])
     expect(mid.map((x) => (x.block as { text: string }).text)).toEqual(["IA substitui o time", "IA devolve o tempo do time"])
@@ -88,7 +88,7 @@ describe("motion — buildStory (montagem do roteiro por arquétipo)", () => {
   })
 
   it("qa: a pergunta vira o hook e a resposta o desenvolvimento", () => {
-    const s = buildStory("qa", develop, { qa: { question: "Vale a pena?", answer: "Sim, em semanas" } }, "x")
+    const s = buildStory("qa", develop, { question: "Vale a pena?", answer: "Sim, em semanas" }, "x")
     expect(s.scenes[0].block).toMatchObject({ kind: "statement", label: "Pergunta", text: "Vale a pena?" })
     expect(s.scenes[1].block).toMatchObject({ kind: "statement", label: "Resposta", text: "Sim, em semanas" })
     expect(s.scenes.at(-1)!.block.kind).toBe("cta")
