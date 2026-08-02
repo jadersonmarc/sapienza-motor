@@ -1,4 +1,3 @@
-import { loadFont } from "@remotion/fonts"
 import { staticFile, delayRender, continueRender } from "remotion"
 import { fonts } from "../../lib/brand/tokens"
 
@@ -15,19 +14,28 @@ const faces = [
 
 // Só carrega no contexto de render (Chromium tem FontFace); ao ser importado por um
 // script Node (bundler/worker) isto é um no-op silencioso.
-if (typeof FontFace !== "undefined") {
-  // Timeout folgado no delayRender; mas o cap abaixo garante continuar bem antes.
+//
+// Usa a API NATIVA FontFace (não @remotion/fonts): assim o ÚNICO delayRender é o
+// nosso (com cap). O loadFont do @remotion/fonts criava um delayRender próprio que
+// pendurava quando a URL da fonte não resolvia — e que o nosso cap não conseguia
+// liberar, travando o render.
+if (typeof FontFace !== "undefined" && typeof document !== "undefined") {
   const handle = delayRender("loading brand fonts", { timeoutInMilliseconds: 60000 })
   const load = Promise.all(
-    faces.map((f) =>
-      loadFont({ family: f.family, url: staticFile(`fonts/${f.file}`), weight: f.weight, style: "normal" }),
-    ),
+    faces.map(async (f) => {
+      const face = new FontFace(f.family, `url(${staticFile(`fonts/${f.file}`)})`, {
+        weight: f.weight,
+        style: "normal",
+      })
+      await face.load()
+      document.fonts.add(face)
+    }),
   ).catch((err) => {
+    // Não trava o render se uma face falhar — cai no fallback do navegador.
     console.error("[motion/fonts] falha ao carregar:", err)
   })
-  // Cap: o carregamento de fonte NUNCA pode travar o render. Se em 10s não resolver
-  // (ex.: fonte não servida no ambiente de render), seguimos com o fallback do
-  // navegador — vídeo com fonte de sistema é melhor que render falho.
+  // Cap: carregamento de fonte NUNCA pode travar o render. Se em 10s não resolver,
+  // seguimos com o fallback do sistema — vídeo é melhor que render falho.
   const cap = new Promise<void>((resolve) => setTimeout(resolve, 10000))
   Promise.race([load, cap]).finally(() => continueRender(handle))
 }
