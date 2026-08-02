@@ -1,14 +1,25 @@
 import { slugify } from "@/lib/content/slug"
-import { MOTION_PRESETS, type MotionPreset, type MotionAspect, type MotionProps } from "@/lib/content/motion-types"
+import {
+  MOTION_PRESETS,
+  type MotionPreset,
+  type MotionAspect,
+  type MotionProps,
+  type MotionField,
+  type MotionScene,
+  type SceneBlock,
+  type StoryProps,
+} from "@/lib/content/motion-types"
 import { callStructured, isAiConfigured } from "./client"
 
 export { MOTION_PRESETS }
 export type { MotionPreset, MotionAspect, MotionProps }
 
-// Geração de peça de MOTION (vídeo animado). A Margot escolhe qual dos 4 presets
-// preenche melhor o conteúdo do brief e devolve os campos estruturados que o
-// Remotion vai animar. Mesma voz/tom das peças estáticas (composeSystem). Seam:
-// sem ANTHROPIC_API_KEY cai num stub determinístico (opera/testa sem chave).
+// Geração de peça de MOTION (vídeo animado). A Margot devolve um ROTEIRO de cenas
+// (hook → desenvolvimento → CTA): escolhe o bloco de DESENVOLVIMENTO (um dos presets
+// de cena única) + um hook curto de abertura + a chamada final. O código monta o
+// StoryProps (preset `story`) que o Remotion anima com <Series>. Mesma voz/tom das
+// peças estáticas (composeSystem). Seam: sem ANTHROPIC_API_KEY cai num stub
+// determinístico (opera/testa sem chave).
 //
 // GUARDRAIL (AJUSTE 1): o preset `stat` (card de dado + contador) só pode ser
 // escolhido quando houver um número VERIFICÁVEL no brief. O modelo preenche
@@ -49,7 +60,8 @@ function composeSystem(brief: MotionBrief, allowStat: boolean): string {
   const tone = (brief.tone ?? "").trim()
   if (tone) s += `\n\nTom desejado: ${tone}.`
   s +=
-    "\n\nEscolha o preset que MELHOR representa o conteúdo:\n" +
+    "\n\nO vídeo é um ROTEIRO curto com 3 momentos: um HOOK de abertura, o DESENVOLVIMENTO e uma " +
+    "CHAMADA final. Escolha o preset de DESENVOLVIMENTO que MELHOR representa o conteúdo:\n" +
     "- headline: uma manchete forte (poucas palavras), com UMA palavra a destacar.\n" +
     "- quote: uma citação/afirmação de marca, com uma frase-chave a destacar e a autoria.\n" +
     "- slides: 2 a 4 mini-cards (título curto por slide) — bom para listas/passos.\n"
@@ -62,8 +74,12 @@ function composeSystem(brief: MotionBrief, allowStat: boolean): string {
     s += "- (o preset `stat` está indisponível nesta peça — escolha entre headline, quote ou slides.)\n"
   }
   s +=
-    "\nPreencha APENAS o objeto do preset escolhido. Devolva também `title` (uso interno) e " +
-    "`caption` (legenda pronta para publicar, pt-BR, praticamente sem emojis)."
+    "\nAlém do desenvolvimento, devolva:\n" +
+    "- `hook`: 2 a 5 palavras de abertura que fisguem a atenção (não repita a manchete literalmente).\n" +
+    "- `cta`: uma chamada final curta e específica (ex.: 'Fale com a gente', 'Saiba mais'), sem link.\n" +
+    "- `theme`: 'ink' (fundo escuro) ou 'surface' (fundo claro) — escolha o que combina com o tema.\n" +
+    "\nPreencha APENAS o objeto do preset de desenvolvimento escolhido. Devolva também `title` (uso " +
+    "interno) e `caption` (legenda pronta para publicar, pt-BR, praticamente sem emojis)."
   return s
 }
 
@@ -72,12 +88,27 @@ function schemaFor(allowStat: boolean) {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["preset", "aspect", "title", "caption"],
+    required: ["preset", "aspect", "title", "caption", "hook", "cta"],
     properties: {
       preset: { type: "string", enum: [...presets] },
       aspect: { type: "string", enum: [...MOTION_ASPECTS], description: "1x1/4x5 (feed) ou 9x16 (story vertical)" },
       title: { type: "string", description: "Título curto de uso interno" },
       caption: { type: "string", description: "Legenda pronta para publicar" },
+      theme: { type: "string", enum: ["ink", "surface"], description: "fundo escuro (ink) ou claro (surface)" },
+      hook: {
+        type: "object",
+        additionalProperties: false,
+        required: ["words"],
+        properties: {
+          words: { type: "array", items: { type: "string" }, description: "2–5 palavras de abertura" },
+        },
+      },
+      cta: {
+        type: "object",
+        additionalProperties: false,
+        required: ["text"],
+        properties: { text: { type: "string", description: "chamada final curta (sem link)" } },
+      },
       headline: {
         type: "object",
         additionalProperties: false,
@@ -139,6 +170,9 @@ type RawMotion = {
   aspect: MotionAspect
   title: string
   caption: string
+  theme?: MotionField
+  hook?: { words: string[] }
+  cta?: { text: string }
   headline?: { words: string[]; highlightIndex: number }
   quote?: { quote: string; keyphrase: string; author: string }
   slides?: { slides: { index: number; title: string }[] }
@@ -159,7 +193,9 @@ export function statSourceInBrief(source: string, brief: MotionBrief): boolean {
   return normalize(briefText(brief)).includes(src)
 }
 
-function toProps(raw: RawMotion): MotionProps | null {
+// Extrai o BLOCO de desenvolvimento escolhido pelo modelo. null se o objeto do
+// preset não veio válido (o chamador regenera / cai no fallback).
+function toProps(raw: RawMotion): SceneBlock | null {
   switch (raw.preset) {
     case "headline":
       if (!raw.headline || !Array.isArray(raw.headline.words) || raw.headline.words.length === 0) return null
@@ -175,13 +211,48 @@ function toProps(raw: RawMotion): MotionProps | null {
     case "stat":
       if (!raw.stat) return null
       return { kind: "stat", ...raw.stat }
+    default:
+      return null
   }
+}
+
+// Duração (segundos) da cena de desenvolvimento conforme o bloco: slides pedem mais
+// tempo (um por card); os demais ~3s. Hook e CTA têm duração fixa.
+const HOOK_SEC = 1.6
+const CTA_SEC = 2.0
+function developSec(block: SceneBlock): number {
+  if (block.kind === "slides") return Math.min(6, Math.max(3, block.slides.length * 1.2))
+  if (block.kind === "stat") return 3.5
+  return 3
+}
+
+/** Monta o roteiro de 3 cenas (hook → desenvolvimento → CTA) a partir do bloco de
+ *  desenvolvimento e dos campos hook/cta/theme. Garante SEMPRE hook e CTA (deriva se
+ *  o modelo omitir). Puro e testável. */
+export function buildStory(develop: SceneBlock, raw: Pick<RawMotion, "hook" | "cta" | "theme">, prompt: string): StoryProps {
+  const hookWords = (raw.hook?.words ?? []).map((w) => w.trim()).filter(Boolean).slice(0, 5)
+  const fallbackHook = (prompt.trim().split(/\s+/).filter(Boolean).slice(0, 4).join(" ") || "Sapienza").split(/\s+/)
+  const hookBlock: SceneBlock = {
+    kind: "headline",
+    words: hookWords.length >= 2 ? hookWords : fallbackHook,
+    highlightIndex: 0,
+  }
+  const ctaText = (raw.cta?.text ?? "").trim() || "Fale com a gente"
+  const ctaBlock: SceneBlock = { kind: "cta", text: ctaText }
+  const theme: MotionField = raw.theme === "surface" ? "surface" : "ink"
+  const scenes: MotionScene[] = [
+    { role: "hook", durSec: HOOK_SEC, block: hookBlock },
+    { role: "develop", durSec: developSec(develop), block: develop },
+    { role: "cta", durSec: CTA_SEC, block: ctaBlock },
+  ]
+  return { kind: "story", scenes, theme }
 }
 
 async function callMotion(brief: MotionBrief, prompt: string, allowStat: boolean): Promise<RawMotion> {
   const user =
-    `Crie UMA peça de motion a partir do tema/brief abaixo.\n\nTEMA: ${prompt.trim() || "(use o brief da marca)"}\n\n` +
-    "Escolha o preset mais adequado e preencha só o objeto dele."
+    `Crie UMA peça de motion (roteiro hook → desenvolvimento → CTA) a partir do tema/brief abaixo.\n\n` +
+    `TEMA: ${prompt.trim() || "(use o brief da marca)"}\n\n` +
+    "Escolha o preset de desenvolvimento mais adequado e preencha só o objeto dele, além de hook, cta e theme."
   const { data } = await callStructured<RawMotion>({
     system: composeSystem(brief, allowStat),
     user,
@@ -192,26 +263,27 @@ async function callMotion(brief: MotionBrief, prompt: string, allowStat: boolean
   return data
 }
 
-/** Stub determinístico sem IA (opera/testa sem ANTHROPIC_API_KEY). Nunca escolhe
- *  `stat` — não há número verificável. */
+/** Stub determinístico sem IA (opera/testa sem ANTHROPIC_API_KEY). Roteiro mínimo
+ *  (hook → manchete → CTA), NUNCA com `stat` (não há número verificável). */
 function fallback(prompt: string): MotionContent {
   const theme = prompt.trim() || "Conteúdo Sapienza Labs"
   const words = theme.split(/\s+/).filter(Boolean).slice(0, 4)
   const safeWords = words.length ? words : ["Sapienza", "Labs"]
+  const develop: SceneBlock = { kind: "headline", words: safeWords, highlightIndex: 0 }
   return {
-    preset: "headline",
-    aspect: "1x1",
+    preset: "story",
+    aspect: "9x16",
     title: theme.slice(0, 80),
     caption: `${theme}\n\n(peça de motion gerada sem IA — configure ANTHROPIC_API_KEY)`,
-    props: { kind: "headline", words: safeWords, highlightIndex: 0 },
+    props: buildStory(develop, {}, prompt),
   }
 }
 
-/** Gera o conteúdo de uma peça de motion a partir do brief do tenant. */
+/** Gera o conteúdo de uma peça de motion (roteiro multi-cena) a partir do brief. */
 export async function generateMotion(prompt: string, brief: MotionBrief = {}): Promise<MotionContent> {
   if (!isAiConfigured()) return fallback(prompt)
 
-  // 1ª tentativa: com `stat` disponível.
+  // 1ª tentativa: com `stat` disponível no desenvolvimento.
   let raw = await callMotion(brief, prompt, true)
 
   // Guardrail: se escolheu stat sem número rastreável no brief, regenera sem stat.
@@ -219,20 +291,20 @@ export async function generateMotion(prompt: string, brief: MotionBrief = {}): P
     raw = await callMotion(brief, prompt, false)
   }
 
-  let props = toProps(raw)
+  let develop = toProps(raw)
   // Rede de segurança: preset sem o objeto correspondente (ou stat ainda inválido) → sem stat.
-  if (!props || (raw.preset === "stat" && !(raw.stat && statSourceInBrief(raw.stat.source, brief)))) {
+  if (!develop || (raw.preset === "stat" && !(raw.stat && statSourceInBrief(raw.stat.source, brief)))) {
     raw = await callMotion(brief, prompt, false)
-    props = toProps(raw)
+    develop = toProps(raw)
   }
-  if (!props) return fallback(prompt) // último recurso, nunca quebra o pipeline
+  if (!develop) return fallback(prompt) // último recurso, nunca quebra o pipeline
 
-  const aspect: MotionAspect = MOTION_ASPECTS.includes(raw.aspect) ? raw.aspect : "1x1"
+  const aspect: MotionAspect = MOTION_ASPECTS.includes(raw.aspect) ? raw.aspect : "9x16"
   return {
-    preset: props.kind,
+    preset: "story",
     aspect,
     title: (raw.title || prompt).trim().slice(0, 120) || slugify(prompt) || "Peça de motion",
     caption: (raw.caption || "").trim(),
-    props,
+    props: buildStory(develop, raw, prompt),
   }
 }
