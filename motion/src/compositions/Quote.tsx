@@ -1,23 +1,23 @@
 import React from "react"
 import { useCurrentFrame, interpolate } from "remotion"
-import { fieldStyle, fonts, minType } from "../../../lib/brand/tokens"
+import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
 import type { QuoteProps, MotionAspect } from "../../../lib/content/motion-types"
 import { Scene, easeOut } from "../brand"
 import { ASPECTS } from "../aspects"
 
 // Citação com destaque: a citação sobe e aparece (~15 frames). Uma tarja varre
 // atrás da frase-chave (scaleX 0→1 da esquerda, ~18 frames) começando ~frame 20.
-// Autoria surge por último (~frame 45).
-export function Quote({
+// Autoria surge por último (~frame 45). `QuoteBody` é o conteúdo sem <Scene>.
+export function QuoteBody({
   aspect,
-  brandHandle,
+  field = "ink",
   quote,
   keyphrase,
   author,
-}: QuoteProps & { aspect: MotionAspect; brandHandle?: string }) {
+}: QuoteProps & { aspect: MotionAspect; field?: Field }) {
   const frame = useCurrentFrame()
   const { w } = ASPECTS[aspect]
-  const fs = fieldStyle.ink
+  const fs = fieldStyle[field]
   const size = Math.max(minType.title - 8, Math.round(w * 0.072))
 
   const qOpacity = interpolate(frame, [0, 15], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
@@ -46,54 +46,60 @@ export function Quote({
   const after = has ? quote.slice(idx + keyphrase.length) : ""
 
   return (
-    <Scene aspect={aspect} field="ink" brandHandle={brandHandle}>
-      <div style={{ opacity: qOpacity, transform: `translateY(${qY}px)` }}>
-        <div
-          style={{
-            fontFamily: fonts.display,
-            fontWeight: 600,
-            fontSize: size,
-            lineHeight: 1.18,
-            color: fs.fg,
-          }}
-        >
-          <span style={{ color: fs.accent }}>“</span>
-          {before}
-          {has && (
-            <span style={{ position: "relative", display: "inline-block", padding: "0 0.08em" }}>
-              <span
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: "0.08em",
-                  bottom: "0.08em",
-                  width: "100%",
-                  backgroundColor: fs.accent,
-                  transform: `scaleX(${bar})`,
-                  transformOrigin: "left",
-                }}
-              />
-              <span style={{ position: "relative", color: bar > 0.5 ? fs.bg : fs.fg }}>{key}</span>
-            </span>
-          )}
-          {after}
-          <span style={{ color: fs.accent }}>”</span>
-        </div>
-        <div
-          style={{
-            marginTop: Math.round(size * 0.6),
-            opacity: authorOpacity,
-            transform: `translateY(${authorY}px)`,
-            fontFamily: fonts.mono,
-            fontWeight: 500,
-            fontSize: Math.max(minType.mono, Math.round(w * 0.028)),
-            color: fs.accent,
-            letterSpacing: 1,
-          }}
-        >
-          — {author}
-        </div>
+    <div style={{ opacity: qOpacity, transform: `translateY(${qY}px)` }}>
+      <div
+        style={{
+          fontFamily: fonts.display,
+          fontWeight: 600,
+          fontSize: size,
+          lineHeight: 1.18,
+          color: fs.fg,
+        }}
+      >
+        <span style={{ color: fs.accent }}>“</span>
+        {before}
+        {has && (
+          <span style={{ position: "relative", display: "inline-block", padding: "0 0.08em" }}>
+            <span
+              style={{
+                position: "absolute",
+                left: 0,
+                top: "0.08em",
+                bottom: "0.08em",
+                width: "100%",
+                backgroundColor: fs.accent,
+                transform: `scaleX(${bar})`,
+                transformOrigin: "left",
+              }}
+            />
+            <span style={{ position: "relative", color: bar > 0.5 ? fs.bg : fs.fg }}>{key}</span>
+          </span>
+        )}
+        {after}
+        <span style={{ color: fs.accent }}>”</span>
       </div>
+      <div
+        style={{
+          marginTop: Math.round(size * 0.6),
+          opacity: authorOpacity,
+          transform: `translateY(${authorY}px)`,
+          fontFamily: fonts.mono,
+          fontWeight: 500,
+          fontSize: Math.max(minType.mono, Math.round(w * 0.028)),
+          color: fs.accent,
+          letterSpacing: 1,
+        }}
+      >
+        — {author}
+      </div>
+    </div>
+  )
+}
+
+export function Quote(props: QuoteProps & { aspect: MotionAspect; brandHandle?: string }) {
+  return (
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle}>
+      <QuoteBody aspect={props.aspect} field="ink" kind="quote" quote={props.quote} keyphrase={props.keyphrase} author={props.author} />
     </Scene>
   )
 }

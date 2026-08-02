@@ -1,21 +1,23 @@
 import React from "react"
 import { useCurrentFrame, useVideoConfig, Easing } from "remotion"
-import { fieldStyle, fonts, minType } from "../../../lib/brand/tokens"
+import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
 import type { SlidesProps, MotionAspect } from "../../../lib/content/motion-types"
 import { Scene } from "../brand"
 import { ASPECTS } from "../aspects"
 
-// Carrossel em loop: percorre 2–4 slides — hold ~40 frames, transição translateX
-// ~15 frames (Easing.inOut), dots sincronizados; termina limpo no último.
-export function Slides({
+// Carrossel em loop: percorre 2–4 slides — hold, transição translateX (Easing.inOut),
+// dots sincronizados; termina limpo no último. `SlidesBody` recebe a duração da CENA
+// explicitamente (dentro de um <Series.Sequence>, useVideoConfig traria a duração
+// TOTAL do vídeo, não a da cena).
+export function SlidesBody({
   aspect,
-  brandHandle,
+  field = "ink",
   slides,
-}: SlidesProps & { aspect: MotionAspect; brandHandle?: string }) {
+  durationInFrames,
+}: SlidesProps & { aspect: MotionAspect; field?: Field; durationInFrames: number }) {
   const frame = useCurrentFrame()
-  const { durationInFrames } = useVideoConfig()
   const { w } = ASPECTS[aspect]
-  const fs = fieldStyle.ink
+  const fs = fieldStyle[field]
   const list = slides.slice(0, 4)
   const n = Math.max(list.length, 1)
   const seg = durationInFrames / n
@@ -29,7 +31,7 @@ export function Slides({
   const titleSize = Math.max(minType.title - 6, Math.round(w * 0.08))
 
   return (
-    <Scene aspect={aspect} field="ink" brandHandle={brandHandle}>
+    <div>
       <div style={{ overflow: "hidden", width: "100%" }}>
         <div style={{ display: "flex", width: `${n * 100}%`, transform: `translateX(-${pos * (100 / n)}%)` }}>
           {list.map((s, i) => (
@@ -83,6 +85,15 @@ export function Slides({
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+export function Slides(props: SlidesProps & { aspect: MotionAspect; brandHandle?: string }) {
+  const { durationInFrames } = useVideoConfig()
+  return (
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle}>
+      <SlidesBody aspect={props.aspect} field="ink" kind="slides" slides={props.slides} durationInFrames={durationInFrames} />
     </Scene>
   )
 }

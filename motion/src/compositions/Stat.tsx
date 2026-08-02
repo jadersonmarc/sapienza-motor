@@ -1,25 +1,26 @@
 import React from "react"
 import { useCurrentFrame, useVideoConfig, spring, interpolate } from "remotion"
-import { fieldStyle, fonts, minType } from "../../../lib/brand/tokens"
+import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
 import type { StatProps, MotionAspect } from "../../../lib/content/motion-types"
 import { Scene, easeOut } from "../brand"
 import { ASPECTS } from "../aspects"
 
 // Card de dado + contador: número sobe de 0 ao valor em ~45 frames com spring
 // (damping 200, sem overshoot), Math.round a cada frame; barra de progresso em
-// paralelo; rótulo/subtítulo fade-in no início. (`source` é proveniência, não é exibido.)
-export function Stat({
+// paralelo; rótulo/subtítulo fade-in. (`source` é proveniência, não é exibido.)
+// `StatBody` é o conteúdo sem <Scene>.
+export function StatBody({
   aspect,
-  brandHandle,
+  field = "ink",
   label,
   value,
   suffix,
   subtitle,
-}: StatProps & { aspect: MotionAspect; brandHandle?: string }) {
+}: StatProps & { aspect: MotionAspect; field?: Field }) {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   const { w } = ASPECTS[aspect]
-  const fs = fieldStyle.ink
+  const fs = fieldStyle[field]
 
   const prog = spring({ frame, fps, config: { damping: 200 }, durationInFrames: 45 })
   const shown = Math.round(value * prog)
@@ -33,7 +34,7 @@ export function Stat({
   const numSize = Math.round(w * 0.22)
 
   return (
-    <Scene aspect={aspect} field="ink" brandHandle={brandHandle}>
+    <div>
       <div
         style={{
           fontFamily: fonts.mono,
@@ -95,6 +96,23 @@ export function Stat({
       >
         {subtitle}
       </div>
+    </div>
+  )
+}
+
+export function Stat(props: StatProps & { aspect: MotionAspect; brandHandle?: string }) {
+  return (
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle}>
+      <StatBody
+        aspect={props.aspect}
+        field="ink"
+        kind="stat"
+        label={props.label}
+        value={props.value}
+        suffix={props.suffix}
+        subtitle={props.subtitle}
+        source={props.source}
+      />
     </Scene>
   )
 }

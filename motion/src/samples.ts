@@ -26,4 +26,24 @@ export const SAMPLES: Record<MotionPreset, MotionProps> = {
     subtitle: "de redução no primeiro mês",
     source: "exemplo (studio)",
   },
+  story: {
+    kind: "story",
+    theme: "ink",
+    scenes: [
+      { role: "hook", durSec: 1.6, block: { kind: "headline", words: ["Perde", "cliente", "por", "demora?"], highlightIndex: 3 } },
+      {
+        role: "develop",
+        durSec: 3.6,
+        block: {
+          kind: "slides",
+          slides: [
+            { index: 0, title: "Capte o lead" },
+            { index: 1, title: "Responda na hora" },
+            { index: 2, title: "Feche a venda" },
+          ],
+        },
+      },
+      { role: "cta", durSec: 2, block: { kind: "cta", text: "Fale com a gente" } },
+    ],
+  },
 }

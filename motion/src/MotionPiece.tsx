@@ -4,6 +4,7 @@ import { Headline } from "./compositions/Headline"
 import { Quote } from "./compositions/Quote"
 import { Slides } from "./compositions/Slides"
 import { Stat } from "./compositions/Stat"
+import { Story } from "./compositions/Story"
 
 // Despacha para a composition do preset. `data.kind` estreita o tipo — cada preset
 // recebe exatamente seus campos.
@@ -23,5 +24,7 @@ export const MotionPiece: React.FC<MotionPieceProps> = ({ aspect, brandHandle, d
       return <Slides aspect={aspect} brandHandle={brandHandle} {...data} />
     case "stat":
       return <Stat aspect={aspect} brandHandle={brandHandle} {...data} />
+    case "story":
+      return <Story aspect={aspect} brandHandle={brandHandle} {...data} />
   }
 }
