@@ -7,6 +7,7 @@ import {
   type MotionBrief,
 } from "./motion"
 import type { SceneBlock, StoryProps } from "@/lib/content/motion-types"
+import { quantizeToBeat, beatSec, AUDIO_TRACKS } from "@/lib/content/motion-audio"
 
 // Testes PUROS (sem IA/DB). Cobrem o guardrail do `stat` (número só do brief) e o
 // fallback determinístico sem ANTHROPIC_API_KEY.
@@ -96,5 +97,30 @@ describe("motion — buildStory (montagem do roteiro por arquétipo)", () => {
     const s = buildStory("myth_fact", develop, {}, "x") // sem mythFact
     expect(s.scenes.map((x) => x.role)).toEqual(["hook", "develop", "cta"])
     expect(s.scenes[1].block).toEqual(develop)
+  })
+
+  it("sem mood: audio 'none' e durações NÃO quantizadas", () => {
+    const s = buildStory("highlight", develop, {}, "x")
+    expect(s.audio).toBe("none")
+    expect(s.scenes[0].durSec).toBe(1.6) // hook mantém a duração original
+  })
+
+  it("com mood: grava o audio e quantiza cada duração à grade de batidas do BPM", () => {
+    const s = buildStory("highlight", develop, { audio: "upbeat" }, "x") // 120 bpm → batida 0.5s
+    expect(s.audio).toBe("upbeat")
+    const grid = beatSec(AUDIO_TRACKS.upbeat.bpm) // 0.5
+    for (const sc of s.scenes) {
+      const beats = sc.durSec / grid
+      expect(Math.abs(beats - Math.round(beats))).toBeLessThan(1e-9) // múltiplo exato de batida
+      expect(sc.durSec).toBeGreaterThanOrEqual(grid)
+    }
+  })
+})
+
+describe("motion-audio — quantizeToBeat", () => {
+  it("encaixa segundos no múltiplo de batida mais próximo (mín. 1 batida)", () => {
+    expect(quantizeToBeat(1.6, 120)).toBe(1.5) // 0.5s de batida → 3 batidas
+    expect(quantizeToBeat(2.2, 120)).toBe(2.0) // 4 batidas
+    expect(quantizeToBeat(0.1, 120)).toBe(0.5) // nunca menos que 1 batida
   })
 })

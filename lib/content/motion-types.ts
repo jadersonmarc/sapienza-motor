@@ -1,6 +1,7 @@
 // Tipos compartilhados dos presets de MOTION — fonte única usada tanto pelo
 // gerador (lib/ai/motion.ts) quanto pelas compositions do Remotion (motion/).
 // Sem dependência de SDK/DB: seguro de importar no bundle do Remotion.
+import type { MotionMood } from "./motion-audio"
 
 // `story` é o preset multi-cena (roteiro hook→desenvolvimento→CTA); os demais são os
 // presets de cena única (mantidos por compat e reusados como BLOCOS de cena do story).
@@ -51,7 +52,8 @@ export type SceneBlock = HeadlineProps | QuoteProps | SlidesProps | StatProps | 
 // Uma cena do roteiro: papel + duração (segundos) + o bloco a animar.
 export type MotionScene = { role: SceneRole; durSec: number; block: SceneBlock }
 
-// Roteiro multi-cena — o que o preset `story` renderiza via <Series>.
-export type StoryProps = { kind: "story"; scenes: MotionScene[]; theme?: MotionField }
+// Roteiro multi-cena — o que o preset `story` renderiza via <Series>. `audio` é o
+// mood da trilha (ver motion-audio); ausente/"none" = mudo.
+export type StoryProps = { kind: "story"; scenes: MotionScene[]; theme?: MotionField; audio?: MotionMood }
 
 export type MotionProps = HeadlineProps | QuoteProps | SlidesProps | StatProps | StoryProps

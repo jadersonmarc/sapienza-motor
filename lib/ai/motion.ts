@@ -11,6 +11,7 @@ import {
   type SceneBlock,
   type StoryProps,
 } from "@/lib/content/motion-types"
+import { MOTION_MOODS, trackFor, quantizeToBeat, type MotionMood } from "@/lib/content/motion-audio"
 import { callStructured, isAiConfigured } from "./client"
 
 export { MOTION_PRESETS, MOTION_ARCHETYPES }
@@ -87,6 +88,8 @@ function composeSystem(brief: MotionBrief, allowStat: boolean): string {
     "- `hook`: 2 a 5 palavras de abertura que fisguem a atenção (não repita a manchete literalmente).\n" +
     "- `cta`: uma chamada final curta e específica (ex.: 'Fale com a gente', 'Saiba mais'), sem link.\n" +
     "- `theme`: 'ink' (fundo escuro) ou 'surface' (fundo claro) — escolha o que combina com o tema.\n" +
+    "- `audio`: clima da trilha — 'calm' (sóbrio/institucional), 'upbeat' (dinâmico/varejo), 'bold' " +
+    "(impactante) ou 'none' (sem trilha). Escolha o que combina com o conteúdo.\n" +
     "\nPreencha APENAS o objeto do preset de desenvolvimento escolhido. Devolva também `title` (uso " +
     "interno) e `caption` (legenda pronta para publicar, pt-BR, praticamente sem emojis)."
   return s
@@ -105,6 +108,7 @@ function schemaFor(allowStat: boolean) {
       title: { type: "string", description: "Título curto de uso interno" },
       caption: { type: "string", description: "Legenda pronta para publicar" },
       theme: { type: "string", enum: ["ink", "surface"], description: "fundo escuro (ink) ou claro (surface)" },
+      audio: { type: "string", enum: [...MOTION_MOODS], description: "clima da trilha (none = sem trilha)" },
       list: {
         type: "object",
         additionalProperties: false,
@@ -206,6 +210,7 @@ type RawMotion = {
   title: string
   caption: string
   theme?: MotionField
+  audio?: MotionMood
   hook?: { words: string[] }
   cta?: { text: string }
   list?: { items: string[] }
@@ -276,7 +281,7 @@ function stmt(role: MotionScene["role"], label: string | undefined, text: string
 export function buildStory(
   archetype: MotionArchetype,
   develop: SceneBlock,
-  raw: Pick<RawMotion, "hook" | "cta" | "theme" | "list" | "mythFact" | "beforeAfter" | "qa">,
+  raw: Pick<RawMotion, "hook" | "cta" | "theme" | "audio" | "list" | "mythFact" | "beforeAfter" | "qa">,
   prompt: string,
 ): StoryProps {
   const hookWords = (raw.hook?.words ?? []).map((w) => w.trim()).filter(Boolean).slice(0, 5)
@@ -316,7 +321,12 @@ export function buildStory(
     }
   }
 
-  return { kind: "story", scenes: [lead, ...middle, ctaScene], theme }
+  const audio: MotionMood = MOTION_MOODS.includes(raw.audio as MotionMood) ? (raw.audio as MotionMood) : "none"
+  let scenes = [lead, ...middle, ctaScene]
+  // Beat-sync: com trilha, encaixa a duração de cada cena na grade de batidas do BPM.
+  const track = trackFor(audio)
+  if (track) scenes = scenes.map((s) => ({ ...s, durSec: quantizeToBeat(s.durSec, track.bpm) }))
+  return { kind: "story", scenes, theme, audio }
 }
 
 async function callMotion(brief: MotionBrief, prompt: string, allowStat: boolean): Promise<RawMotion> {
