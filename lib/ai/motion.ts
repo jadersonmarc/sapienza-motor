@@ -105,6 +105,7 @@ function schemaFor(allowStat: boolean) {
   const strArray = (description: string) => ({ type: "array", items: { type: "string" }, description })
   return {
     type: "object",
+    additionalProperties: false,
     required: ["preset", "archetype", "aspect", "title", "caption"],
     properties: {
       preset: { type: "string", enum: [...presets] },
@@ -114,7 +115,8 @@ function schemaFor(allowStat: boolean) {
       caption: { type: "string", description: "Legenda pronta para publicar" },
       theme: { type: "string", enum: ["ink", "surface"], description: "fundo escuro (ink) ou claro (surface)" },
       audio: { type: "string", enum: [...MOTION_MOODS], description: "clima da trilha (none = sem trilha)" },
-      // Abertura + chamada (achatados).
+      // Abertura + chamada (achatados — escalares/arrays, não objetos: mantém a
+      // gramática do structured output barata, ver "Grammar compilation timed out").
       hook_words: strArray("2–5 palavras de abertura"),
       cta_text: { type: "string", description: "chamada final curta (sem link)" },
       // Conteúdo por arquétipo (achatado — preencha só o do arquétipo escolhido).
@@ -125,9 +127,12 @@ function schemaFor(allowStat: boolean) {
       after: { type: "string", description: "archetype before_after: o depois" },
       question: { type: "string", description: "archetype qa: a pergunta" },
       answer: { type: "string", description: "archetype qa: a resposta" },
-      // Desenvolvimento (usado no highlight e como reserva).
+      // Desenvolvimento (usado no highlight e como reserva). A API de structured
+      // output exige additionalProperties:false em TODO objeto.
       headline: {
         type: "object",
+        additionalProperties: false,
+        required: ["words", "highlightIndex"],
         properties: {
           words: strArray("3–6 palavras da manchete"),
           highlightIndex: { type: "number", description: "índice (0-based) da palavra a destacar" },
@@ -135,6 +140,8 @@ function schemaFor(allowStat: boolean) {
       },
       quote: {
         type: "object",
+        additionalProperties: false,
+        required: ["quote", "keyphrase", "author"],
         properties: {
           quote: { type: "string" },
           keyphrase: { type: "string", description: "trecho da citação a destacar (substring da citação)" },
@@ -143,10 +150,17 @@ function schemaFor(allowStat: boolean) {
       },
       slides: {
         type: "object",
+        additionalProperties: false,
+        required: ["slides"],
         properties: {
           slides: {
             type: "array",
-            items: { type: "object", properties: { index: { type: "number" }, title: { type: "string" } } },
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["index", "title"],
+              properties: { index: { type: "number" }, title: { type: "string" } },
+            },
             description: "2 a 4 slides",
           },
         },
@@ -155,6 +169,8 @@ function schemaFor(allowStat: boolean) {
         ? {
             stat: {
               type: "object",
+              additionalProperties: false,
+              required: ["label", "value", "suffix", "subtitle", "source"],
               properties: {
                 label: { type: "string" },
                 value: { type: "number" },
