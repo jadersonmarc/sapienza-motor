@@ -243,7 +243,7 @@ maybe("motor API", () => {
     )
     expect(denied.status).toBe(403)
 
-    // Pro cria (202); sem IA o conteúdo cai no fallback (preset headline), render fica 'queued'.
+    // Pro cria (202); sem IA o conteúdo cai no fallback (roteiro `story`), render fica 'queued'.
     const pro = await provisionTenant(sql, "pro")
     const proTok = await token(pro)
     const res = await POST(req("POST", "/api/v1/content/motion", proTok, { prompt: "convite webinar" }))
@@ -258,7 +258,7 @@ maybe("motor API", () => {
     }
     expect(detail.is_motion).toBe(true)
     expect(detail.render_status).toBe("queued")
-    expect(detail.motion_preset).toBe("headline")
+    expect(detail.motion_preset).toBe("story")
   })
 
   it("PUT /content/:id edita → nova revisão atual", async () => {
