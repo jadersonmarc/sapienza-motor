@@ -83,8 +83,11 @@ export async function POST(req: Request): Promise<Response> {
         })
         await setMotionMeta(tx, item.id, { preset: content.preset, aspect: content.aspect })
         await finishGenerating(tx, item.id, null)
+        // Só AGORA (preset/aspect/props gravados) libera para o render — evita a
+        // corrida do worker pegar a peça em 'preparing' sem os dados.
+        await setRenderStatus(tx, item.id, "queued")
       })
-      // render_status segue 'queued' → cutuca o render agora (cron é só fallback).
+      // Já preparada e enfileirada → cutuca o render agora (cron é só fallback).
       await pokeRenderWorker()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

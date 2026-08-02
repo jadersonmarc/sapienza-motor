@@ -64,16 +64,17 @@ export async function finishGenerating(tx: Tx, id: string, error: string | null)
 
 // ── Motion (peça em movimento) ────────────────────────────────────────────────
 
-/** Cria a peça de motion JÁ marcada (is_motion, generating, render_status=queued),
- *  sem revisão — o conteúdo do preset é gerado depois em background (after()) e o
- *  MP4 é renderizado pelo serviço de render, que escreve video_url + render_status. */
+/** Cria a peça de motion (is_motion, generating). Nasce em render_status='preparing'
+ *  — NÃO em 'queued' — para o serviço de render NÃO pegá-la antes da geração gravar
+ *  preset/aspect/props (race: a geração é assíncrona e agora chama a IA de verdade).
+ *  Só vira 'queued' quando a geração termina (setRenderStatus). Sem revisão ainda. */
 export async function createMotionItem(
   tx: Tx,
   input: { slug: string; format?: string; authorId?: string | null },
 ): Promise<{ id: string }> {
   const [item] = (await tx`
     INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status, config_version)
-    VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, true, 'queued',
+    VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, true, 'preparing',
             (SELECT config_version FROM editor_config WHERE id = true))
     RETURNING id
   `) as unknown as { id: string }[]
