@@ -12,7 +12,7 @@ import {
   type StoryProps,
 } from "@/lib/content/motion-types"
 import { MOTION_MOODS, trackFor, quantizeToBeat, type MotionMood } from "@/lib/content/motion-audio"
-import { callStructured, isAiConfigured } from "./client"
+import { callJson, isAiConfigured } from "./client"
 
 export { MOTION_PRESETS, MOTION_ARCHETYPES }
 export type { MotionPreset, MotionAspect, MotionProps, MotionArchetype }
@@ -322,7 +322,10 @@ async function callMotion(brief: MotionBrief, prompt: string, allowStat: boolean
     `Crie UMA peça de motion (roteiro hook → desenvolvimento → CTA) a partir do tema/brief abaixo.\n\n` +
     `TEMA: ${prompt.trim() || "(use o brief da marca)"}\n\n` +
     "Escolha o preset de desenvolvimento mais adequado e preencha só o objeto dele, além de hook, cta e theme."
-  const { data } = await callStructured<RawMotion>({
+  // callJson (sem gramática): o schema do motion é rico demais para o structured
+  // output estrito ("Schema is too complex."). Pedimos JSON no prompt e validamos
+  // aqui (toProps/buildStory já toleram campos faltando/inválidos).
+  const { data } = await callJson<RawMotion>({
     system: composeSystem(brief, allowStat),
     user,
     schema: schemaFor(allowStat),
