@@ -34,7 +34,12 @@ const BRAND_HANDLE = process.env.MOTION_BRAND_HANDLE ?? "@sapienzalabs" // TODO:
 let serveUrlPromise: Promise<string> | null = null
 function getServeUrl(): Promise<string> {
   if (!serveUrlPromise) {
-    serveUrlPromise = bundle({ entryPoint: join(process.cwd(), "src", "index.ts") })
+    // publicDir explícito: garante que o bundle sirva public/fonts (e public/audio)
+    // via staticFile no ambiente de render — sem isso o load de fonte pode pendurar.
+    serveUrlPromise = bundle({
+      entryPoint: join(process.cwd(), "src", "index.ts"),
+      publicDir: join(process.cwd(), "public"),
+    })
   }
   return serveUrlPromise
 }

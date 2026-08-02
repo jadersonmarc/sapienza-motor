@@ -16,18 +16,20 @@ const faces = [
 // Só carrega no contexto de render (Chromium tem FontFace); ao ser importado por um
 // script Node (bundler/worker) isto é um no-op silencioso.
 if (typeof FontFace !== "undefined") {
-  const handle = delayRender("loading brand fonts")
-  Promise.all(
+  // Timeout folgado no delayRender; mas o cap abaixo garante continuar bem antes.
+  const handle = delayRender("loading brand fonts", { timeoutInMilliseconds: 60000 })
+  const load = Promise.all(
     faces.map((f) =>
       loadFont({ family: f.family, url: staticFile(`fonts/${f.file}`), weight: f.weight, style: "normal" }),
     ),
-  )
-    .then(() => continueRender(handle))
-    .catch((err) => {
-      // Não trava o render se uma face falhar — cai no fallback do navegador.
-      console.error("[motion/fonts] falha ao carregar:", err)
-      continueRender(handle)
-    })
+  ).catch((err) => {
+    console.error("[motion/fonts] falha ao carregar:", err)
+  })
+  // Cap: o carregamento de fonte NUNCA pode travar o render. Se em 10s não resolver
+  // (ex.: fonte não servida no ambiente de render), seguimos com o fallback do
+  // navegador — vídeo com fonte de sistema é melhor que render falho.
+  const cap = new Promise<void>((resolve) => setTimeout(resolve, 10000))
+  Promise.race([load, cap]).finally(() => continueRender(handle))
 }
 
 export { fonts }
