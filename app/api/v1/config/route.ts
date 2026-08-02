@@ -40,6 +40,12 @@ export async function PUT(req: Request): Promise<Response> {
     enabled: body.enabled !== false,
     cadence_days,
     handle: String(body.handle ?? "").trim().slice(0, 60),
+    // Logo: só aceitamos URL https (ou vazio) — cai no vídeo do cliente. Qualquer
+    // outra coisa é descartada (vira vazio → monograma).
+    logo_url: (() => {
+      const u = String(body.logo_url ?? "").trim().slice(0, 500)
+      return u === "" || /^https:\/\//i.test(u) ? u : ""
+    })(),
   }
 
   const sql = getDb()

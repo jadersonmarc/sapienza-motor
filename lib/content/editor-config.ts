@@ -15,6 +15,8 @@ export type EditorConfig = {
   cadence_days: number
   /** Handle da marca no rodapé das peças de motion (ex.: @cliente). Vazio = default. */
   handle: string
+  /** URL pública (https) do logo da marca no rodapé. Vazio = monograma (inicial do handle). */
+  logo_url: string
 }
 
 const DEFAULTS: EditorConfig = {
@@ -26,11 +28,12 @@ const DEFAULTS: EditorConfig = {
   enabled: true,
   cadence_days: 7,
   handle: "",
+  logo_url: "",
 }
 
 export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
   const rows = (await tx`
-    SELECT system_prompt, tone, themes, format, model, enabled, cadence_days, handle FROM editor_config WHERE id = true
+    SELECT system_prompt, tone, themes, format, model, enabled, cadence_days, handle, logo_url FROM editor_config WHERE id = true
   `) as unknown as {
     system_prompt: string
     tone: string
@@ -40,6 +43,7 @@ export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
     enabled: boolean
     cadence_days: number
     handle: string | null
+    logo_url: string | null
   }[]
   const r = rows[0]
   if (!r) return { ...DEFAULTS }
@@ -53,13 +57,14 @@ export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
     enabled: r.enabled,
     cadence_days: r.cadence_days ?? 7,
     handle: r.handle ?? "",
+    logo_url: r.logo_url ?? "",
   }
 }
 
 export async function upsertEditorConfig(tx: Tx, cfg: EditorConfig): Promise<void> {
   await tx`
-    INSERT INTO editor_config (id, system_prompt, tone, themes, format, model, enabled, cadence_days, handle, updated_at)
-    VALUES (true, ${cfg.system_prompt}, ${cfg.tone}, ${tx.json(cfg.themes)}, ${cfg.format}, ${cfg.model}, ${cfg.enabled}, ${cfg.cadence_days}, ${cfg.handle}, now())
+    INSERT INTO editor_config (id, system_prompt, tone, themes, format, model, enabled, cadence_days, handle, logo_url, updated_at)
+    VALUES (true, ${cfg.system_prompt}, ${cfg.tone}, ${tx.json(cfg.themes)}, ${cfg.format}, ${cfg.model}, ${cfg.enabled}, ${cfg.cadence_days}, ${cfg.handle}, ${cfg.logo_url}, now())
     ON CONFLICT (id) DO UPDATE SET
       system_prompt = EXCLUDED.system_prompt,
       tone = EXCLUDED.tone,
@@ -69,6 +74,7 @@ export async function upsertEditorConfig(tx: Tx, cfg: EditorConfig): Promise<voi
       enabled = EXCLUDED.enabled,
       cadence_days = EXCLUDED.cadence_days,
       handle = EXCLUDED.handle,
+      logo_url = EXCLUDED.logo_url,
       -- Bump a versão só quando muda algo que afeta a GERAÇÃO (prompt/tom/temas/
       -- modelo) — não em toggles de enabled/cadência/handle. Cada peça carimba
       -- esta versão na criação (proveniência p/ correlacionar com métricas).

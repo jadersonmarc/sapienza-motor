@@ -11,20 +11,21 @@ import { Story } from "./compositions/Story"
 export type MotionPieceProps = {
   aspect: MotionAspect
   brandHandle?: string
+  brandLogo?: string
   data: MotionProps
 }
 
-export const MotionPiece: React.FC<MotionPieceProps> = ({ aspect, brandHandle, data }) => {
+export const MotionPiece: React.FC<MotionPieceProps> = ({ aspect, brandHandle, brandLogo, data }) => {
   switch (data.kind) {
     case "headline":
-      return <Headline aspect={aspect} brandHandle={brandHandle} {...data} />
+      return <Headline aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} {...data} />
     case "quote":
-      return <Quote aspect={aspect} brandHandle={brandHandle} {...data} />
+      return <Quote aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} {...data} />
     case "slides":
-      return <Slides aspect={aspect} brandHandle={brandHandle} {...data} />
+      return <Slides aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} {...data} />
     case "stat":
-      return <Stat aspect={aspect} brandHandle={brandHandle} {...data} />
+      return <Stat aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} {...data} />
     case "story":
-      return <Story aspect={aspect} brandHandle={brandHandle} {...data} />
+      return <Story aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} {...data} />
   }
 }

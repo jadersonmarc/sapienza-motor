@@ -96,9 +96,9 @@ export function QuoteBody({
   )
 }
 
-export function Quote(props: QuoteProps & { aspect: MotionAspect; brandHandle?: string }) {
+export function Quote(props: QuoteProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
   return (
-    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle}>
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo}>
       <QuoteBody aspect={props.aspect} field="ink" kind="quote" quote={props.quote} keyphrase={props.keyphrase} author={props.author} />
     </Scene>
   )

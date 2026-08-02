@@ -89,10 +89,10 @@ export function SlidesBody({
   )
 }
 
-export function Slides(props: SlidesProps & { aspect: MotionAspect; brandHandle?: string }) {
+export function Slides(props: SlidesProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
   const { durationInFrames } = useVideoConfig()
   return (
-    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle}>
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo}>
       <SlidesBody aspect={props.aspect} field="ink" kind="slides" slides={props.slides} durationInFrames={durationInFrames} />
     </Scene>
   )

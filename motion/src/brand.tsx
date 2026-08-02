@@ -1,5 +1,5 @@
 import React from "react"
-import { AbsoluteFill, useCurrentFrame, interpolate, Easing } from "remotion"
+import { AbsoluteFill, Img, useCurrentFrame, interpolate, Easing } from "remotion"
 import { fieldStyle, fonts, type Field } from "../../lib/brand/tokens"
 import type { MotionAspect } from "../../lib/content/motion-types"
 import { ASPECTS } from "./aspects"
@@ -19,11 +19,13 @@ export function Scene({
   aspect,
   field = "ink",
   brandHandle = "@sapienzalabs",
+  brandLogo = "",
   children,
 }: {
   aspect: MotionAspect
   field?: Field
   brandHandle?: string
+  brandLogo?: string
   children: React.ReactNode
 }) {
   const { w } = ASPECTS[aspect]
@@ -35,13 +37,20 @@ export function Scene({
         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
           {children}
         </div>
-        <BrandFooter field={field} handle={brandHandle} />
+        <BrandFooter field={field} handle={brandHandle} logo={brandLogo} />
       </AbsoluteFill>
     </AbsoluteFill>
   )
 }
 
-function BrandFooter({ field, handle }: { field: Field; handle: string }) {
+// Inicial da marca a partir do handle (strip @, 1º alfanumérico, maiúsculo). É o
+// monograma quando não há logo — do CLIENTE, não da Sapienza.
+function brandInitial(handle: string): string {
+  const m = handle.replace(/^@+/, "").match(/[a-zA-Z0-9]/)
+  return (m?.[0] ?? "S").toUpperCase()
+}
+
+function BrandFooter({ field, handle, logo = "" }: { field: Field; handle: string; logo?: string }) {
   const frame = useCurrentFrame()
   const fs = fieldStyle[field]
   const opacity = interpolate(frame, [8, 24], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
@@ -58,25 +67,30 @@ function BrandFooter({ field, handle }: { field: Field; handle: string }) {
         paddingTop: 22,
       }}
     >
-      {/* marca gráfica: monograma em bloco de acento (tokens) */}
-      <div
-        style={{
-          width: 40,
-          height: 40,
-          backgroundColor: fs.accent,
-          borderRadius: 8,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: fs.bg,
-          fontFamily: fonts.display,
-          fontWeight: 700,
-          fontSize: 26,
-          lineHeight: 1,
-        }}
-      >
-        S
-      </div>
+      {logo ? (
+        // Logo do tenant (o worker só passa uma URL https acessível).
+        <Img src={logo} style={{ height: 44, width: "auto", maxWidth: 200, objectFit: "contain", borderRadius: 8 }} />
+      ) : (
+        // Fallback: monograma com a inicial da marca (bloco de acento, tokens).
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            backgroundColor: fs.accent,
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: fs.bg,
+            fontFamily: fonts.display,
+            fontWeight: 700,
+            fontSize: 26,
+            lineHeight: 1,
+          }}
+        >
+          {brandInitial(handle)}
+        </div>
+      )}
       <span style={{ fontFamily: fonts.mono, fontWeight: 500, fontSize: 26, color: fs.fg, letterSpacing: 0.5 }}>
         {handle}
       </span>

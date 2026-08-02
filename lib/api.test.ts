@@ -154,6 +154,22 @@ maybe("motor API", () => {
     expect(res.status).toBe(400)
   })
 
+  it("config: logo_url aceita https e descarta não-https (vídeo do cliente)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t, { role: "owner" })
+    const { GET, PUT } = await import("@/app/api/v1/config/route")
+
+    // https é aceito
+    expect((await PUT(req("PUT", "/api/v1/config", tok, { logo_url: "https://cdn/logo.png" }))).status).toBe(200)
+    let cfg = (await (await GET(req("GET", "/api/v1/config", tok))).json()) as { logo_url: string }
+    expect(cfg.logo_url).toBe("https://cdn/logo.png")
+
+    // http (não seguro) é descartado → vazio (cai no monograma)
+    expect((await PUT(req("PUT", "/api/v1/config", tok, { logo_url: "http://cdn/x.png" }))).status).toBe(200)
+    cfg = (await (await GET(req("GET", "/api/v1/config", tok))).json()) as { logo_url: string }
+    expect(cfg.logo_url).toBe("")
+  })
+
   it("desconectar exige owner/admin — member recebe 403", async () => {
     const t = await provisionTenant(sql, "pro")
     const { DELETE } = await import("@/app/api/v1/channels/route")

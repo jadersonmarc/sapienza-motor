@@ -93,13 +93,14 @@ function Soundtrack({ file }: { file: string }) {
 export function Story({
   aspect,
   brandHandle,
+  brandLogo,
   scenes,
   theme = "ink",
   audio = "none",
-}: StoryProps & { aspect: MotionAspect; brandHandle?: string }) {
+}: StoryProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
   const track = trackFor(audio)
   return (
-    <Scene aspect={aspect} field={theme} brandHandle={brandHandle}>
+    <Scene aspect={aspect} field={theme} brandHandle={brandHandle} brandLogo={brandLogo}>
       {track ? <Soundtrack file={track.file} /> : null}
       <StoryScenes scenes={scenes} aspect={aspect} field={theme} />
     </Scene>

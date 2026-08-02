@@ -46,6 +46,19 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ])
 }
 
+// Valida o logo do tenant: só passa adiante se for https e responder OK a um HEAD
+// rápido. Qualquer falha → "" (o rodapé usa o monograma). Nunca lança.
+async function resolveLogo(url: string | null | undefined): Promise<string> {
+  const u = (url ?? "").trim()
+  if (!/^https:\/\//i.test(u)) return ""
+  try {
+    const res = await fetch(u, { method: "HEAD", signal: AbortSignal.timeout(5000) })
+    return res.ok ? u : ""
+  } catch {
+    return ""
+  }
+}
+
 type QueuedRow = { id: string; slug: string; motion_preset: string | null; motion_aspect: string | null }
 
 async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: QueuedRow): Promise<void> {
@@ -55,11 +68,16 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     if (!isStorageConfigured()) throw new Error("storage R2 não configurado (S3_* / MOTOR_PUBLIC_URL)")
     const preset = item.motion_preset
     const aspect = item.motion_aspect
-    const { data, handle } = await withTenant(sql, tenantId, async (tx) => ({
-      data: await getMotionProps(tx, item.id),
-      handle: (await getEditorConfig(tx)).handle,
-    }))
+    const { data, handle, logoUrl } = await withTenant(sql, tenantId, async (tx) => {
+      const cfg = await getEditorConfig(tx)
+      return { data: await getMotionProps(tx, item.id), handle: cfg.handle, logoUrl: cfg.logo_url }
+    })
     if (!preset || !aspect || !data) throw new Error("peça de motion sem preset/aspect/props")
+
+    // Logo do tenant (seam robusto): só usamos se for https E estiver acessível —
+    // logo quebrado jamais pode derrubar o render do vídeo do cliente. Falha → vazio
+    // (o rodapé cai no monograma da inicial do handle).
+    const brandLogo = await resolveLogo(logoUrl)
 
     // Trilha (seam): só toca se a faixa do mood existir em public/audio. Sem o
     // arquivo, rebaixa para mudo — o vídeo sai como sempre saiu.
@@ -72,7 +90,7 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     }
 
     const serveUrl = await getServeUrl()
-    const inputProps = { aspect, brandHandle: handle?.trim() || BRAND_HANDLE, data }
+    const inputProps = { aspect, brandHandle: handle?.trim() || BRAND_HANDLE, brandLogo, data }
     const composition = await selectComposition({ serveUrl, id: compositionId(preset, aspect), inputProps })
     // Otimizado para vídeo social curto (sem áudio): frames em jpeg (mais rápido
     // que png) e encode x264 com preset veloz + crf moderado — corta o tempo de

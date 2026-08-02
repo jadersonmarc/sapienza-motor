@@ -84,9 +84,9 @@ export function HeadlineBody({
 }
 
 // Composition de cena única (compat): <Scene> + corpo, campo escuro como sempre.
-export function Headline(props: HeadlineProps & { aspect: MotionAspect; brandHandle?: string }) {
+export function Headline(props: HeadlineProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
   return (
-    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle}>
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo}>
       <HeadlineBody aspect={props.aspect} field="ink" kind="headline" words={props.words} highlightIndex={props.highlightIndex} />
     </Scene>
   )

@@ -100,9 +100,9 @@ export function StatBody({
   )
 }
 
-export function Stat(props: StatProps & { aspect: MotionAspect; brandHandle?: string }) {
+export function Stat(props: StatProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
   return (
-    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle}>
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo}>
       <StatBody
         aspect={props.aspect}
         field="ink"
