@@ -27,6 +27,8 @@ export type ContentItem = {
   motion_preset: string | null
   motion_aspect: string | null
   video_url: string | null
+  /** Fan-out: map aspecto→URL de todos os formatos renderizados desta peça. */
+  video_urls: Record<string, string> | null
   render_status: string | null
   render_error: string | null
   /** versão do editor_config vigente na criação (proveniência p/ métricas). */
@@ -91,9 +93,14 @@ export async function setMotionMeta(
   `
 }
 
-/** Grava o MP4 renderizado (R2) na peça — escrito pelo serviço de render. */
+/** Grava o MP4 do formato PRINCIPAL (R2) na peça — usado na publicação. */
 export async function setItemVideo(tx: Tx, id: string, videoUrl: string): Promise<void> {
   await tx`UPDATE content_items SET video_url = ${videoUrl}, updated_at = now() WHERE id = ${id}`
+}
+
+/** Grava o map de TODOS os formatos renderizados (fan-out): aspecto→URL. */
+export async function setItemVideos(tx: Tx, id: string, urls: Record<string, string>): Promise<void> {
+  await tx`UPDATE content_items SET video_urls = ${tx.json(urls)}, updated_at = now() WHERE id = ${id}`
 }
 
 /** Estado do render (queued|rendering|done|error) + motivo do erro (null limpa). */

@@ -11,6 +11,14 @@ export type MotionAspect = "1x1" | "4x5" | "9x16"
 export const MOTION_PRESETS: readonly MotionPreset[] = ["headline", "quote", "slides", "stat", "story"]
 export const MOTION_ASPECTS: readonly MotionAspect[] = ["1x1", "4x5", "9x16"]
 
+// Fan-out: da mesma peça, renderiza o formato PRINCIPAL (o que a IA escolheu) +
+// Stories/Reels (9x16) + feed (1x1). Dedup preservando a ordem (principal 1º).
+export function fanoutAspects(primary: MotionAspect): MotionAspect[] {
+  const out: MotionAspect[] = []
+  for (const a of [primary, "9x16", "1x1"] as MotionAspect[]) if (!out.includes(a)) out.push(a)
+  return out
+}
+
 export type HeadlineProps = { kind: "headline"; words: string[]; highlightIndex: number }
 export type QuoteProps = { kind: "quote"; quote: string; keyphrase: string; author: string }
 export type SlidesProps = { kind: "slides"; slides: { index: number; title: string }[] }

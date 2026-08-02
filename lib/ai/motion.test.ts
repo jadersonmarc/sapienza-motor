@@ -7,6 +7,7 @@ import {
   type MotionBrief,
 } from "./motion"
 import type { SceneBlock, StoryProps } from "@/lib/content/motion-types"
+import { fanoutAspects } from "@/lib/content/motion-types"
 import { quantizeToBeat, beatSec, AUDIO_TRACKS } from "@/lib/content/motion-audio"
 
 // Testes PUROS (sem IA/DB). Cobrem o guardrail do `stat` (número só do brief) e o
@@ -114,6 +115,14 @@ describe("motion — buildStory (montagem do roteiro por arquétipo)", () => {
       expect(Math.abs(beats - Math.round(beats))).toBeLessThan(1e-9) // múltiplo exato de batida
       expect(sc.durSec).toBeGreaterThanOrEqual(grid)
     }
+  })
+})
+
+describe("motion — fanoutAspects", () => {
+  it("sempre inclui 9x16 + 1x1, com o principal 1º e sem duplicar", () => {
+    expect(fanoutAspects("9x16")).toEqual(["9x16", "1x1"])
+    expect(fanoutAspects("1x1")).toEqual(["1x1", "9x16"])
+    expect(fanoutAspects("4x5")).toEqual(["4x5", "9x16", "1x1"])
   })
 })
 

@@ -9,10 +9,10 @@ import { selectComposition, renderMedia } from "@remotion/renderer"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { activeTenants } from "@/lib/platform/gating"
-import { listQueuedMotion, getMotionProps, setItemVideo, setRenderStatus } from "@/lib/content/store"
+import { listQueuedMotion, getMotionProps, setItemVideo, setItemVideos, setRenderStatus } from "@/lib/content/store"
 import { getEditorConfig } from "@/lib/content/editor-config"
 import { trackFor } from "@/lib/content/motion-audio"
-import type { StoryProps } from "@/lib/content/motion-types"
+import { fanoutAspects, type MotionAspect, type StoryProps } from "@/lib/content/motion-types"
 import { contentTransition } from "@/lib/content/transition"
 import { uploadObject, isStorageConfigured } from "@/lib/storage/s3"
 import { motionVideoKey } from "@/lib/storage/keys"
@@ -63,11 +63,10 @@ type QueuedRow = { id: string; slug: string; motion_preset: string | null; motio
 
 async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: QueuedRow): Promise<void> {
   await withTenant(sql, tenantId, (tx) => setRenderStatus(tx, item.id, "rendering"))
-  const output = join(tmpdir(), `motion-${randomUUID()}.mp4`)
   try {
     if (!isStorageConfigured()) throw new Error("storage R2 não configurado (S3_* / MOTOR_PUBLIC_URL)")
     const preset = item.motion_preset
-    const aspect = item.motion_aspect
+    const aspect = item.motion_aspect as MotionAspect | null
     const { data, handle, logoUrl } = await withTenant(sql, tenantId, async (tx) => {
       const cfg = await getEditorConfig(tx)
       return { data: await getMotionProps(tx, item.id), handle: cfg.handle, logoUrl: cfg.logo_url }
@@ -90,43 +89,60 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     }
 
     const serveUrl = await getServeUrl()
-    const inputProps = { aspect, brandHandle: handle?.trim() || BRAND_HANDLE, brandLogo, data }
-    const composition = await selectComposition({ serveUrl, id: compositionId(preset, aspect), inputProps })
-    // Otimizado para vídeo social curto (sem áudio): frames em jpeg (mais rápido
-    // que png) e encode x264 com preset veloz + crf moderado — corta o tempo de
-    // render sem perda visível no feed.
-    const opts = {
-      composition,
-      serveUrl,
-      codec: "h264" as const,
-      outputLocation: output,
-      inputProps,
-      licenseKey: LICENSE_KEY,
-      imageFormat: "jpeg" as const,
-      jpegQuality: 80,
-      x264Preset: "faster" as const,
-      crf: 23,
-      // Trilha presente → encode com AAC; sem trilha, segue mudo (como antes).
-      ...(hasAudio ? { audioCodec: "aac" as const } : {}),
-    }
-    await withTimeout(renderMedia(opts as Parameters<typeof renderMedia>[0]), TIMEOUT_MS, "render")
 
-    const buf = await readFile(output)
-    const url = await uploadObject(tenantId, motionVideoKey({ slug: item.slug, aspect }), buf, "video/mp4")
+    // Renderiza UM formato (aspecto) → sobe no R2 e devolve a URL. Chave já é por
+    // aspecto (motionVideoKey), sem colisão.
+    const renderAspect = async (a: MotionAspect): Promise<string> => {
+      const output = join(tmpdir(), `motion-${randomUUID()}.mp4`)
+      try {
+        const inputProps = { aspect: a, brandHandle: handle?.trim() || BRAND_HANDLE, brandLogo, data }
+        const composition = await selectComposition({ serveUrl, id: compositionId(preset, a), inputProps })
+        const opts = {
+          composition,
+          serveUrl,
+          codec: "h264" as const,
+          outputLocation: output,
+          inputProps,
+          licenseKey: LICENSE_KEY,
+          imageFormat: "jpeg" as const,
+          jpegQuality: 80,
+          x264Preset: "faster" as const,
+          crf: 23,
+          ...(hasAudio ? { audioCodec: "aac" as const } : {}),
+        }
+        await withTimeout(renderMedia(opts as Parameters<typeof renderMedia>[0]), TIMEOUT_MS, `render ${a}`)
+        const buf = await readFile(output)
+        return await uploadObject(tenantId, motionVideoKey({ slug: item.slug, aspect: a }), buf, "video/mp4")
+      } finally {
+        await unlink(output).catch(() => {})
+      }
+    }
+
+    // Fan-out: principal (obrigatório) + formatos extras (best-effort — falha num
+    // extra não derruba a peça; o principal é o que publica).
+    const aspects = fanoutAspects(aspect)
+    const urls: Record<string, string> = {}
+    urls[aspect] = await renderAspect(aspect) // principal: erro aqui → peça em 'error'
+    for (const a of aspects.slice(1)) {
+      try {
+        urls[a] = await renderAspect(a)
+      } catch (e) {
+        console.error(`[motion-worker] formato extra ${a} falhou (peça ${item.id}):`, e instanceof Error ? e.message : e)
+      }
+    }
 
     await withTenant(sql, tenantId, async (tx) => {
-      await setItemVideo(tx, item.id, url)
+      await setItemVideo(tx, item.id, urls[aspect])
+      await setItemVideos(tx, item.id, urls)
       await setRenderStatus(tx, item.id, "done")
     })
     // Render pronto → entra na janela de aprovação de 48h (silêncio = aprovado).
     await contentTransition(sql, tenantId, item.id, "in_review")
-    console.log(`[motion-worker] ok: peça ${item.id} (${preset}/${aspect}) → ${url}`)
+    console.log(`[motion-worker] ok: peça ${item.id} (${preset}) → ${Object.keys(urls).join(", ")}`)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error(`[motion-worker] falha na peça ${item.id}:`, msg)
     await withTenant(sql, tenantId, (tx) => setRenderStatus(tx, item.id, "error", msg)).catch(() => {})
-  } finally {
-    await unlink(output).catch(() => {})
   }
 }
 
