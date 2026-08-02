@@ -67,6 +67,21 @@ Saída: `OK <canal>: <url>` (evidência), `FALHOU <canal>: <erro>` (exit 1) ou
 > Anote aqui o id/URL retornado por cada validação conforme sair. Um canal que **falhar** (não
 > "pendente") sai do catálogo removendo-o de `supportedPlatforms()`.
 
+## Métricas (Bloco D)
+
+Coleta diária (cron `collect-metrics`, dia São Paulo, idempotente) de dois fatos:
+
+- **Por post** (`post_metrics`): impressões/alcance/curtidas/comentários/compart. Adapters reais:
+  **Instagram** (Graph insights) e **Facebook** (page-post insights + summary). **LinkedIn não tem
+  coleta por post** — post de perfil pessoal (`urn:li:person`) não expõe métrica por post via API;
+  é limitação da plataforma, não falha (não fingimos dado).
+- **De conta** (`channel_metrics`): seguidores/alcance de conta ao longo do tempo. `fetchAccount`
+  em IG (`followers_count`) e FB (`fan_count`).
+
+Sem credencial/adapter do canal, a coleta é no-op (seam). As stats alimentam o relatório
+(desempenho + crescimento de seguidores) e o assistente de IA (`editora_stats`/`top_posts`/
+`by_config`/`growth`).
+
 ## Falha de publicação (visível e reprocessável)
 
 - Estado **por canal** em `social_drafts` (`status='sent'|'failed'`, `last_error`) — sucesso apaga a
