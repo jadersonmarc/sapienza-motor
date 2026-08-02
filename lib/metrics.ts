@@ -19,10 +19,19 @@ export type PostMetrics = {
   clicks?: number
 }
 
+/** Métricas de CONTA (não de post): série de crescimento do canal. */
+export type ChannelMetrics = {
+  followers?: number
+  reach?: number
+}
+
 export interface MetricsAdapter {
   readonly platform: Platform
   /** Busca as métricas do post (id nativo) via API do canal. null = sem dados. */
   fetchPost(nativeId: string, credentials: string | null): Promise<PostMetrics | null>
+  /** Métricas de CONTA do canal (seguidores/alcance). Opcional — canal sem isto
+   *  não alimenta channel_metrics. null = sem dados. */
+  fetchAccount?(credentials: string | null): Promise<ChannelMetrics | null>
 }
 
 /** Extrai o id nativo do post a partir do post_url que nós mesmos geramos
@@ -78,6 +87,18 @@ class InstagramMetricsAdapter implements MetricsAdapter {
       saves: v("saved"),
     }
   }
+  async fetchAccount(credentials: string | null): Promise<ChannelMetrics | null> {
+    if (!credentials) return null
+    const { access_token, account_id } = JSON.parse(credentials) as { access_token: string; account_id: string }
+    const base = "https://graph.facebook.com/v21.0"
+    const res = await fetch(
+      `${base}/${account_id}?fields=followers_count&access_token=${encodeURIComponent(access_token)}`,
+      { signal: AbortSignal.timeout(20000) },
+    )
+    if (!res.ok) throw new Error(`instagram account: ${res.status} ${await res.text().catch(() => "")}`)
+    const data = (await res.json()) as { followers_count?: number }
+    return { followers: data.followers_count }
+  }
 }
 
 class FacebookMetricsAdapter implements MetricsAdapter {
@@ -113,6 +134,18 @@ class FacebookMetricsAdapter implements MetricsAdapter {
       comments: obj.comments?.summary?.total_count,
       shares: obj.shares?.count,
     }
+  }
+  async fetchAccount(credentials: string | null): Promise<ChannelMetrics | null> {
+    if (!credentials) return null
+    const { access_token, page_id } = JSON.parse(credentials) as { access_token: string; page_id: string }
+    const base = "https://graph.facebook.com/v21.0"
+    const res = await fetch(
+      `${base}/${page_id}?fields=fan_count&access_token=${encodeURIComponent(access_token)}`,
+      { signal: AbortSignal.timeout(20000) },
+    )
+    if (!res.ok) throw new Error(`facebook account: ${res.status} ${await res.text().catch(() => "")}`)
+    const data = (await res.json()) as { fan_count?: number }
+    return { followers: data.fan_count }
   }
 }
 
@@ -193,6 +226,88 @@ export async function collectMetrics(
     }
   }
   return { scanned: posts.length, written, failures }
+}
+
+/** Grava (idempotente por dia) o snapshot de métricas de CONTA de um canal. */
+export async function upsertChannelMetrics(
+  tx: Tx,
+  input: { platform: Platform; day: string; metrics: ChannelMetrics },
+): Promise<void> {
+  const m = input.metrics
+  await tx`
+    INSERT INTO channel_metrics (platform, day, followers, reach, fetched_at)
+    VALUES (${input.platform}, ${input.day}::date, ${m.followers ?? null}, ${m.reach ?? null}, now())
+    ON CONFLICT (platform, day) DO UPDATE SET
+      followers = EXCLUDED.followers, reach = EXCLUDED.reach, fetched_at = now()
+  `
+}
+
+/** Coleta o snapshot diário de CONTA (seguidores/alcance) por canal conectado que
+ *  tenha adapter com fetchAccount + credencial. Erro num canal não derruba o lote. */
+export async function collectChannelMetrics(
+  sql: Sql,
+  tenantId: string,
+  adapters: (p: Platform) => MetricsAdapter | null = metricsAdapterFor,
+  now: Date = new Date(),
+): Promise<{ written: number; failures: { platform: string; error: string }[] }> {
+  const day = currentDay(now)
+  const channels = await withTenant(sql, tenantId, async (tx) => {
+    return (await tx`
+      SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true
+    `) as unknown as { platform: Platform; credentials_enc: string | null }[]
+  })
+
+  let written = 0
+  const failures: { platform: string; error: string }[] = []
+  for (const c of channels) {
+    const adapter = adapters(c.platform)
+    if (!adapter?.fetchAccount) continue // canal sem coleta de conta
+    try {
+      const creds = c.credentials_enc ? decryptSecret(c.credentials_enc) : null
+      const metrics = await adapter.fetchAccount(creds)
+      if (!metrics) continue
+      await withTenant(sql, tenantId, (tx) => upsertChannelMetrics(tx, { platform: c.platform, day, metrics }))
+      written++
+    } catch (e) {
+      failures.push({ platform: c.platform, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return { written, failures }
+}
+
+export type GrowthSeriesRow = { day: string; followers: number; reach: number }
+export type ChannelGrowth = {
+  platform: string
+  series: GrowthSeriesRow[]
+  followersStart: number
+  followersEnd: number
+  delta: number
+}
+
+/** Crescimento de conta no período (mês São Paulo): série diária por canal +
+ *  variação de seguidores início→fim. Ignora dias sem leitura de seguidores. */
+export async function channelGrowthForPeriod(sql: Sql, tenantId: string, period: string): Promise<ChannelGrowth[]> {
+  const rows = await withTenant(sql, tenantId, async (tx) => {
+    return (await tx`
+      SELECT platform, to_char(day, 'YYYY-MM-DD') AS day,
+             COALESCE(followers, 0)::int AS followers, COALESCE(reach, 0)::int AS reach
+        FROM channel_metrics
+       WHERE to_char(day, 'YYYY-MM') = ${period}
+       ORDER BY platform, day
+    `) as unknown as { platform: string; day: string; followers: number; reach: number }[]
+  })
+  const byPlatform = new Map<string, GrowthSeriesRow[]>()
+  for (const r of rows) {
+    const arr = byPlatform.get(r.platform) ?? []
+    arr.push({ day: r.day, followers: r.followers, reach: r.reach })
+    byPlatform.set(r.platform, arr)
+  }
+  return [...byPlatform.entries()].map(([platform, series]) => {
+    const withFollowers = series.filter((s) => s.followers > 0)
+    const followersStart = withFollowers[0]?.followers ?? 0
+    const followersEnd = withFollowers.at(-1)?.followers ?? 0
+    return { platform, series, followersStart, followersEnd, delta: followersEnd - followersStart }
+  })
 }
 
 // ── Stats (envelope compartilhado com a Atendente) ────────────────────────────

@@ -13,8 +13,12 @@ import {
   topPostsForPeriod,
   byConfigForPeriod,
   metricsAdapterFor,
+  collectChannelMetrics,
+  channelGrowthForPeriod,
+  upsertChannelMetrics,
   type MetricsAdapter,
   type PostMetrics,
+  type ChannelMetrics,
 } from "@/lib/metrics"
 import { currentPeriod, currentDay } from "@/lib/platform/period"
 import type { Sql } from "@/lib/db"
@@ -172,5 +176,40 @@ maybe("métricas (série temporal)", () => {
     expect(byConfig).toHaveLength(2) // v1 e v2
     const v2 = byConfig.find((r) => r.config_version === 2)!
     expect(v2).toMatchObject({ posts: 1, impressions: 200 })
+  })
+
+  const fakeAccountAdapter = (m: ChannelMetrics): ((p: string) => MetricsAdapter | null) => {
+    const a: MetricsAdapter = { platform: "instagram", async fetchPost() { return null }, async fetchAccount() { return m } }
+    return (p) => (p === "instagram" ? a : null)
+  }
+
+  it("coleta de conta (channel_metrics) é idempotente por dia", async () => {
+    const t = await provisionTenant(sql, "pro")
+    await connectChannel(sql, t, "instagram", "creds")
+
+    const r1 = await collectChannelMetrics(sql, t, fakeAccountAdapter({ followers: 1000 }))
+    expect(r1.written).toBe(1)
+    const r2 = await collectChannelMetrics(sql, t, fakeAccountAdapter({ followers: 1100 }))
+    expect(r2.written).toBe(1)
+    const rows = (await withTenant(sql, t, (tx) =>
+      tx`SELECT followers FROM channel_metrics WHERE platform = 'instagram'`,
+    )) as unknown as { followers: number }[]
+    expect(rows).toHaveLength(1) // um snapshot do dia
+    expect(rows[0].followers).toBe(1100) // sobrescrito, não somado
+  })
+
+  it("crescimento: delta de seguidores início→fim por canal", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const period = currentPeriod()
+    await withTenant(sql, t, async (tx) => {
+      await upsertChannelMetrics(tx, { platform: "instagram", day: `${period}-01`, metrics: { followers: 1000 } })
+      await upsertChannelMetrics(tx, { platform: "instagram", day: `${period}-15`, metrics: { followers: 1200 } })
+    })
+    const growth = await channelGrowthForPeriod(sql, t, period)
+    const ig = growth.find((g) => g.platform === "instagram")!
+    expect(ig.series).toHaveLength(2)
+    expect(ig.followersStart).toBe(1000)
+    expect(ig.followersEnd).toBe(1200)
+    expect(ig.delta).toBe(200)
   })
 })
