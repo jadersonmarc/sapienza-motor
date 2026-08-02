@@ -8,6 +8,7 @@ import { HeadlineBody } from "./Headline"
 import { QuoteBody } from "./Quote"
 import { SlidesBody } from "./Slides"
 import { StatBody } from "./Stat"
+import { StatementBody } from "./Statement"
 import { CtaBody } from "./Cta"
 
 // Roteiro multi-cena: um único <Scene> (fundo on-brand + rodapé) contendo um
@@ -36,6 +37,8 @@ function BlockBody({ block, aspect, field, frames }: { block: SceneBlock; aspect
           source={block.source}
         />
       )
+    case "statement":
+      return <StatementBody aspect={aspect} field={field} kind="statement" label={block.label} text={block.text} />
     case "cta":
       return <CtaBody aspect={aspect} field={field} kind="cta" text={block.text} handle={block.handle} />
   }

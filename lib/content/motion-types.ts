@@ -24,14 +24,29 @@ export type StatProps = {
 // Chamada à ação — cena final do roteiro. Convite curto + handle.
 export type CtaProps = { kind: "cta"; text: string; handle?: string }
 
+// Afirmação com rótulo — primitiva dos arquétipos (Mito/Verdade, Antes/Depois,
+// item de lista, resposta). Chip de rótulo (opcional) + frase grande.
+export type StatementProps = { kind: "statement"; label?: string; text: string }
+
+// Arquétipos de vídeo: cada um monta uma sequência de cenas própria a partir dos
+// blocos. `highlight` é o arco genérico (hook→desenvolvimento→CTA).
+export type MotionArchetype = "highlight" | "list" | "myth_fact" | "before_after" | "qa"
+export const MOTION_ARCHETYPES: readonly MotionArchetype[] = [
+  "highlight",
+  "list",
+  "myth_fact",
+  "before_after",
+  "qa",
+]
+
 // Campo cromático da peça (espelha lib/brand/tokens: ink = escuro, surface = claro).
 export type MotionField = "ink" | "surface"
 
 // Papel da cena no arco narrativo do vídeo.
 export type SceneRole = "hook" | "develop" | "cta"
 
-// Blocos que uma cena pode conter (reusam os presets de cena única + CTA).
-export type SceneBlock = HeadlineProps | QuoteProps | SlidesProps | StatProps | CtaProps
+// Blocos que uma cena pode conter (presets de cena única + statement + CTA).
+export type SceneBlock = HeadlineProps | QuoteProps | SlidesProps | StatProps | StatementProps | CtaProps
 
 // Uma cena do roteiro: papel + duração (segundos) + o bloco a animar.
 export type MotionScene = { role: SceneRole; durSec: number; block: SceneBlock }

@@ -48,23 +48,53 @@ describe("motion — fallback sem IA", () => {
   })
 })
 
-describe("motion — buildStory (montagem do roteiro)", () => {
+describe("motion — buildStory (montagem do roteiro por arquétipo)", () => {
   const develop: SceneBlock = { kind: "slides", slides: [{ index: 0, title: "A" }, { index: 1, title: "B" }] }
 
-  it("sempre entrega hook + desenvolvimento + CTA, mesmo sem hook/cta do modelo", () => {
-    const s = buildStory(develop, {}, "atendimento no whatsapp")
+  it("highlight: hook + desenvolvimento + CTA, mesmo sem hook/cta do modelo", () => {
+    const s = buildStory("highlight", develop, {}, "atendimento no whatsapp")
     expect(s.scenes.map((x) => x.role)).toEqual(["hook", "develop", "cta"])
     expect(s.scenes[0].block.kind).toBe("headline") // hook derivado do tema
     expect(s.scenes[1].block).toEqual(develop)
     expect(s.scenes[2].block).toMatchObject({ kind: "cta", text: "Fale com a gente" }) // CTA padrão
-    expect(s.theme).toBe("ink") // default
+    expect(s.theme).toBe("ink")
   })
 
   it("usa hook/cta/theme do modelo quando presentes", () => {
-    const s = buildStory(develop, { hook: { words: ["Perca", "menos", "leads"] }, cta: { text: "Saiba mais" }, theme: "surface" }, "x")
+    const s = buildStory("highlight", develop, { hook: { words: ["Perca", "menos", "leads"] }, cta: { text: "Saiba mais" }, theme: "surface" }, "x")
     expect(s.scenes[0].block).toMatchObject({ kind: "headline", words: ["Perca", "menos", "leads"] })
     expect(s.scenes[2].block).toMatchObject({ kind: "cta", text: "Saiba mais" })
     expect(s.theme).toBe("surface")
     expect(s.scenes.every((x) => x.durSec > 0)).toBe(true)
+  })
+
+  it("list: uma cena statement numerada por item, entre hook e CTA", () => {
+    const s = buildStory("list", develop, { list: { items: ["Capte o lead", "Responda na hora", "Feche a venda"] } }, "x")
+    expect(s.scenes.map((x) => x.role)).toEqual(["hook", "develop", "develop", "develop", "cta"])
+    const items = s.scenes.filter((x) => x.role === "develop")
+    expect(items.every((x) => x.block.kind === "statement")).toBe(true)
+    expect(items.map((x) => (x.block as { label?: string }).label)).toEqual(["01", "02", "03"])
+    expect(s.scenes.at(-1)!.block.kind).toBe("cta")
+  })
+
+  it("myth_fact: dois statements rotulados Mito/Verdade", () => {
+    const s = buildStory("myth_fact", develop, { mythFact: { myth: "IA substitui o time", fact: "IA devolve o tempo do time" } }, "x")
+    const mid = s.scenes.filter((x) => x.role === "develop")
+    expect(mid.map((x) => (x.block as { label?: string }).label)).toEqual(["Mito", "Verdade"])
+    expect(mid.map((x) => (x.block as { text: string }).text)).toEqual(["IA substitui o time", "IA devolve o tempo do time"])
+    expect(s.scenes.at(-1)!.block.kind).toBe("cta")
+  })
+
+  it("qa: a pergunta vira o hook e a resposta o desenvolvimento", () => {
+    const s = buildStory("qa", develop, { qa: { question: "Vale a pena?", answer: "Sim, em semanas" } }, "x")
+    expect(s.scenes[0].block).toMatchObject({ kind: "statement", label: "Pergunta", text: "Vale a pena?" })
+    expect(s.scenes[1].block).toMatchObject({ kind: "statement", label: "Resposta", text: "Sim, em semanas" })
+    expect(s.scenes.at(-1)!.block.kind).toBe("cta")
+  })
+
+  it("arquétipo sem conteúdo cai no desenvolvimento (reserva)", () => {
+    const s = buildStory("myth_fact", develop, {}, "x") // sem mythFact
+    expect(s.scenes.map((x) => x.role)).toEqual(["hook", "develop", "cta"])
+    expect(s.scenes[1].block).toEqual(develop)
   })
 })
