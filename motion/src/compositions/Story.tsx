@@ -1,7 +1,8 @@
 import React from "react"
-import { Series, useCurrentFrame, useVideoConfig, interpolate } from "remotion"
+import { Series, Audio, staticFile, useCurrentFrame, useVideoConfig, interpolate } from "remotion"
 import type { Field } from "../../../lib/brand/tokens"
 import type { MotionAspect, MotionScene, SceneBlock, StoryProps } from "../../../lib/content/motion-types"
+import { trackFor } from "../../../lib/content/motion-audio"
 import { Scene } from "../brand"
 import { framesForSec } from "../aspects"
 import { HeadlineBody } from "./Headline"
@@ -70,14 +71,36 @@ function StoryScenes({ scenes, aspect, field }: { scenes: MotionScene[]; aspect:
   )
 }
 
+// Trilha da peça: toca a faixa do mood por todo o vídeo, com fade-in/out suave. O
+// worker só deixa `audio` != none quando o arquivo existe em public/audio (seam),
+// então aqui é seguro referenciar staticFile.
+function Soundtrack({ file }: { file: string }) {
+  const { durationInFrames, fps } = useVideoConfig()
+  const fade = Math.min(15, Math.round(fps * 0.5))
+  return (
+    <Audio
+      src={staticFile(`audio/${file}`)}
+      volume={(f) =>
+        interpolate(f, [0, fade, Math.max(fade, durationInFrames - fade), durationInFrames], [0, 0.7, 0.7, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        })
+      }
+    />
+  )
+}
+
 export function Story({
   aspect,
   brandHandle,
   scenes,
   theme = "ink",
+  audio = "none",
 }: StoryProps & { aspect: MotionAspect; brandHandle?: string }) {
+  const track = trackFor(audio)
   return (
     <Scene aspect={aspect} field={theme} brandHandle={brandHandle}>
+      {track ? <Soundtrack file={track.file} /> : null}
       <StoryScenes scenes={scenes} aspect={aspect} field={theme} />
     </Scene>
   )

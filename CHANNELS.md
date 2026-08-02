@@ -82,6 +82,20 @@ Sem credencial/adapter do canal, a coleta é no-op (seam). As stats alimentam o 
 (desempenho + crescimento de seguidores) e o assistente de IA (`editora_stats`/`top_posts`/
 `by_config`/`growth`).
 
+## Trilha do motion (seam)
+
+O vídeo de motion pode ter **trilha sonora** com pacing na batida (beat-sync). A música é asset do
+operador (licenciada) — entra como seam:
+
+1. Solte as faixas em `sapienza-motor/assets/audio/` com estes nomes/BPM (do catálogo
+   `lib/content/motion-audio.ts`): `calm.mp3` (90 bpm), `upbeat.mp3` (120 bpm), `bold.mp3` (100 bpm).
+2. Redeploy do **render-worker** do motion (o `copy-assets` do boot copia para `public/audio`).
+
+Com os arquivos presentes, a IA escolhe o mood por peça e o worker liga a trilha (encode AAC) + fade;
+as durações das cenas já vêm quantizadas à batida do BPM. **Sem os arquivos, o vídeo sai mudo** (o
+worker rebaixa o mood para `none`) — exatamente como antes. Beat-sync aqui é quantização por BPM fixo
+(sem análise de áudio em runtime).
+
 ## Falha de publicação (visível e reprocessável)
 
 - Estado **por canal** em `social_drafts` (`status='sent'|'failed'`, `last_error`) — sucesso apaga a

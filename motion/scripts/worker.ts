@@ -1,5 +1,6 @@
 import http from "node:http"
 import { readFile, unlink } from "node:fs/promises"
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { randomUUID } from "node:crypto"
@@ -10,6 +11,8 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { activeTenants } from "@/lib/platform/gating"
 import { listQueuedMotion, getMotionProps, setItemVideo, setRenderStatus } from "@/lib/content/store"
 import { getEditorConfig } from "@/lib/content/editor-config"
+import { trackFor } from "@/lib/content/motion-audio"
+import type { StoryProps } from "@/lib/content/motion-types"
 import { contentTransition } from "@/lib/content/transition"
 import { uploadObject, isStorageConfigured } from "@/lib/storage/s3"
 import { motionVideoKey } from "@/lib/storage/keys"
@@ -58,6 +61,16 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     }))
     if (!preset || !aspect || !data) throw new Error("peça de motion sem preset/aspect/props")
 
+    // Trilha (seam): só toca se a faixa do mood existir em public/audio. Sem o
+    // arquivo, rebaixa para mudo — o vídeo sai como sempre saiu.
+    let hasAudio = false
+    if (data.kind === "story") {
+      const story = data as StoryProps
+      const track = trackFor(story.audio ?? "none")
+      hasAudio = !!track && existsSync(join(process.cwd(), "public", "audio", track.file))
+      if (!hasAudio) story.audio = "none"
+    }
+
     const serveUrl = await getServeUrl()
     const inputProps = { aspect, brandHandle: handle?.trim() || BRAND_HANDLE, data }
     const composition = await selectComposition({ serveUrl, id: compositionId(preset, aspect), inputProps })
@@ -75,6 +88,8 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
       jpegQuality: 80,
       x264Preset: "faster" as const,
       crf: 23,
+      // Trilha presente → encode com AAC; sem trilha, segue mudo (como antes).
+      ...(hasAudio ? { audioCodec: "aac" as const } : {}),
     }
     await withTimeout(renderMedia(opts as Parameters<typeof renderMedia>[0]), TIMEOUT_MS, "render")
 
