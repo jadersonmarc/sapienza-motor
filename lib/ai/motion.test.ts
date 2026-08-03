@@ -118,6 +118,21 @@ describe("motion — buildStory (montagem do roteiro por arquétipo)", () => {
   })
 })
 
+describe("motion — preferências do usuário via buildStory (a UI força)", () => {
+  const develop: SceneBlock = { kind: "headline", words: ["a", "b"], highlightIndex: 0 }
+
+  it("arquétipo forçado monta o roteiro do arquétipo (mesmo com pouco conteúdo → reserva)", () => {
+    const s = buildStory("myth_fact", develop, { myth: "M", fact: "V" }, "x")
+    const mid = s.scenes.filter((x) => x.role === "develop")
+    expect(mid.map((x) => (x.block as { label?: string }).label)).toEqual(["Mito", "Verdade"])
+  })
+
+  it("trilha escolhida é gravada no story (via raw.audio)", () => {
+    const s = buildStory("highlight", develop, { audio: "bold" }, "x")
+    expect(s.audio).toBe("bold")
+  })
+})
+
 describe("motion — fanoutAspects", () => {
   it("sempre inclui 9x16 + 1x1, com o principal 1º e sem duplicar", () => {
     expect(fanoutAspects("9x16")).toEqual(["9x16", "1x1"])

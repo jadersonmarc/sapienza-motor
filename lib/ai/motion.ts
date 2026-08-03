@@ -47,6 +47,9 @@ export type MotionBrief = {
   tone?: string
   themes?: string[]
   model?: string
+  // Preferências do usuário (UI). Ausente = automático (a IA decide).
+  archetype?: MotionArchetype
+  audio?: MotionMood
 }
 
 const BASE_SYSTEM =
@@ -70,6 +73,9 @@ function composeSystem(brief: MotionBrief, allowStat: boolean): string {
     "- myth_fact: desfaz um engano — um mito e a verdade (preencha `myth` e `fact`).\n" +
     "- before_after: contraste antes/depois (preencha `before` e `after`).\n" +
     "- qa: uma pergunta que o público faz e a resposta (preencha `question` e `answer`).\n" +
+    (brief.archetype
+      ? `\n**O usuário escolheu o arquétipo \`${brief.archetype}\` — use OBRIGATORIAMENTE esse e preencha os campos dele.**\n`
+      : "") +
     "\nSempre preencha também o preset de DESENVOLVIMENTO (usado no arquétipo `highlight` e como " +
     "reserva se faltar conteúdo do arquétipo). Escolha o preset que melhor representa o conteúdo:\n" +
     "- headline: uma manchete forte (poucas palavras), com UMA palavra a destacar.\n" +
@@ -371,9 +377,13 @@ export async function generateMotion(prompt: string, brief: MotionBrief = {}): P
   }
   if (!develop) return fallback(prompt) // último recurso, nunca quebra o pipeline
 
-  const archetype: MotionArchetype = MOTION_ARCHETYPES.includes(raw.archetype as MotionArchetype)
-    ? (raw.archetype as MotionArchetype)
-    : "highlight"
+  // Preferências do usuário (UI) vencem a escolha da IA. Ausente/inválido = automático.
+  const archetype: MotionArchetype = MOTION_ARCHETYPES.includes(brief.archetype as MotionArchetype)
+    ? (brief.archetype as MotionArchetype)
+    : MOTION_ARCHETYPES.includes(raw.archetype as MotionArchetype)
+      ? (raw.archetype as MotionArchetype)
+      : "highlight"
+  if (MOTION_MOODS.includes(brief.audio as MotionMood)) raw.audio = brief.audio // trilha escolhida
   const aspect: MotionAspect = MOTION_ASPECTS.includes(raw.aspect) ? raw.aspect : "9x16"
   return {
     preset: "story",

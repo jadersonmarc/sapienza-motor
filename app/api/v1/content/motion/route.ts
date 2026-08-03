@@ -5,6 +5,8 @@ import { canOperate, motionEnabled } from "@/lib/platform/gating"
 import { createMotionItem, addRevision, setMotionMeta, finishGenerating, setRenderStatus } from "@/lib/content/store"
 import { getEditorConfig } from "@/lib/content/editor-config"
 import { generateMotion } from "@/lib/ai/motion"
+import { MOTION_ARCHETYPES, type MotionArchetype } from "@/lib/content/motion-types"
+import { MOTION_MOODS, type MotionMood } from "@/lib/content/motion-audio"
 import { slugify } from "@/lib/content/slug"
 import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib/content/quota"
 
@@ -44,11 +46,14 @@ export async function POST(req: Request): Promise<Response> {
     return json(403, { error: "motion não disponível no seu plano (disponível no Pro e no Premium)" })
   }
 
-  const body = (await req.json().catch(() => ({}))) as { prompt?: string; channel?: string }
+  const body = (await req.json().catch(() => ({}))) as { prompt?: string; channel?: string; archetype?: string; audio?: string }
   const prompt = (body.prompt ?? "").trim()
   // Canal-alvo do vídeo (define o formato da peça). Fase 1 publica só pelo Webhook;
   // na Fase 2 o publish nativo usa este canal (instagram/linkedin).
   const channel = body.channel === "linkedin" ? "linkedin" : "instagram"
+  // Preferências opcionais da UI (validadas em generateMotion; inválido = automático).
+  const archetype = MOTION_ARCHETYPES.includes(body.archetype as MotionArchetype) ? (body.archetype as MotionArchetype) : undefined
+  const audio = MOTION_MOODS.includes(body.audio as MotionMood) ? (body.audio as MotionMood) : undefined
 
   // Cota de peça (motion consome como qualquer peça) — debita antes de agendar a IA.
   try {
@@ -71,6 +76,8 @@ export async function POST(req: Request): Promise<Response> {
         tone: cfg.tone,
         themes: cfg.themes,
         model: cfg.model ?? undefined,
+        archetype,
+        audio,
       })
       await withTenant(sql, a.tenantId, async (tx) => {
         await addRevision(tx, item.id, {
