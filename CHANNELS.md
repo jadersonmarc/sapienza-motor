@@ -67,6 +67,22 @@ Saída: `OK <canal>: <url>` (evidência), `FALHOU <canal>: <erro>` (exit 1) ou
 > Anote aqui o id/URL retornado por cada validação conforme sair. Um canal que **falhar** (não
 > "pendente") sai do catálogo removendo-o de `supportedPlatforms()`.
 
+## Permissões do token (publicação + métricas)
+
+O token de cada canal social é usado tanto para **publicar** quanto para **coletar métricas**. Faltando
+o escopo de insights, o canal publica normalmente mas as **métricas ficam vazias sem erro** (Relatório e
+Assistente sem dados). Tokens do Meta/LinkedIn **expiram (~60 dias)** — use sempre o de longa duração.
+
+| Canal | Escopos p/ publicar | Escopos p/ métricas | Validade |
+|---|---|---|---|
+| Instagram | `instagram_basic`, `instagram_content_publish`, `pages_show_list`, `pages_read_engagement` | `instagram_manage_insights` (insights de post + seguidores) | Page Token de longa duração (~60d) |
+| Facebook | `pages_manage_posts`, `pages_read_engagement`, `pages_show_list` | `read_insights` (fan_count já vem em `pages_read_engagement`) | Page Token de longa duração (~60d) |
+| LinkedIn | `w_member_social`, `openid`, `profile` | **sem métrica por post** (perfil pessoal — limitação da API) | access_token ~60d |
+
+Hoje o token é colado manualmente (cifrado em `motor_channels`) e renovado à mão. O mecanismo
+**OAuth + refresh automático** (o cliente conecta uma vez, a Sapienza renova sozinha) está desenhado
+em `~/.claude/plans/ethereal-honking-balloon.md` (Fase 2 — depende de apps OAuth + App Review da Meta).
+
 ## Métricas (Bloco D)
 
 Coleta diária (cron `collect-metrics`, dia São Paulo, idempotente) de dois fatos:
