@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest"
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest"
 import { randomUUID } from "node:crypto"
 import { SignJWT } from "jose"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
@@ -152,6 +152,45 @@ maybe("motor API", () => {
     // A plataforma existe no enum, mas está fora do catálogo → 400 (não 409/200).
     const res = await POST(req("POST", "/api/v1/channels", tok, { platform: "twitter", credentials: "x" }))
     expect(res.status).toBe(400)
+  })
+
+  it("oauth: seam sem app configurado (409); com app + code, conecta o canal", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t, { role: "owner" })
+    const { GET, POST } = await import("@/app/api/v1/channels/oauth/route")
+    const { GET: CHANNELS } = await import("@/app/api/v1/channels/route")
+
+    // Sem envs de app → 409 (o console cai no colar-JSON).
+    expect((await GET(req("GET", "/api/v1/channels/oauth?platform=instagram&state=s1", tok))).status).toBe(409)
+
+    // Configura o app Meta + mocka o fluxo Graph do exchange.
+    process.env.META_APP_ID = "app123"
+    process.env.META_APP_SECRET = "sec"
+    process.env.OAUTH_REDIRECT_BASE = "https://console.x.com"
+    const fetchMock = vi.fn(async (u: string) => {
+      const url = String(u)
+      if (url.includes("fb_exchange_token")) return new Response(JSON.stringify({ access_token: "USERLONG", expires_in: 5184000 }), { status: 200 })
+      if (url.includes("/oauth/access_token")) return new Response(JSON.stringify({ access_token: "SHORT" }), { status: 200 })
+      if (url.includes("/me/accounts")) return new Response(JSON.stringify({ data: [{ id: "PAGE1", access_token: "PAGETOKEN" }] }), { status: 200 })
+      if (url.includes("/PAGE1")) return new Response(JSON.stringify({ instagram_business_account: { id: "IG777" } }), { status: 200 })
+      return new Response("{}", { status: 404 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    try {
+      // GET agora devolve a authorize URL.
+      const g = (await (await GET(req("GET", "/api/v1/channels/oauth?platform=instagram&state=s1", tok))).json()) as { url: string }
+      expect(g.url).toContain("facebook.com")
+      // POST troca o code e conecta.
+      expect((await POST(req("POST", "/api/v1/channels/oauth", tok, { platform: "instagram", code: "CODE" }))).status).toBe(200)
+      const list = (await (await CHANNELS(req("GET", "/api/v1/channels", tok))).json()) as { used: number; channels: { platform: string }[] }
+      expect(list.channels.map((c) => c.platform)).toContain("instagram")
+      expect(list.used).toBe(1)
+    } finally {
+      vi.unstubAllGlobals()
+      delete process.env.META_APP_ID
+      delete process.env.META_APP_SECRET
+      delete process.env.OAUTH_REDIRECT_BASE
+    }
   })
 
   it("config: logo_url aceita https e descarta não-https (vídeo do cliente)", async () => {
