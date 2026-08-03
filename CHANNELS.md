@@ -36,36 +36,9 @@ todos os disponíveis**; a cópia ao cliente no Premium **nunca cita o número**
 
 ## Validação contra conta real
 
-Harness que publica de verdade, sem tocar no banco:
-
-```bash
-pnpm validate:channel -- --platform linkedin
-pnpm validate:channel -- --platform instagram --image https://.../capa.png
-pnpm validate:channel -- --platform facebook  --image https://.../capa.png
-# vídeo: --video https://.../peca.mp4  (Instagram Reels / LinkedIn vídeo)
-```
-
-Credenciais por env (só o canal testado precisa das suas):
-
-| Canal | Envs |
-|---|---|
-| linkedin | `VALIDATE_LI_TOKEN` (token cru; autor resolvido pelo token) |
-| instagram | `VALIDATE_IG_TOKEN`, `VALIDATE_IG_ACCOUNT_ID` |
-| facebook | `VALIDATE_FB_TOKEN`, `VALIDATE_FB_PAGE_ID` |
-
-Saída: `OK <canal>: <url>` (evidência), `FALHOU <canal>: <erro>` (exit 1) ou
-`PENDENTE (sem credencial)` (exit 0 — não pôde ser testado, ≠ falhou).
-
-## Estado da validação
-
-| Canal | Estado | Evidência / motivo |
-|---|---|---|
-| LinkedIn | ⏳ a validar | requer token real (`VALIDATE_LI_TOKEN`); harness pronto |
-| Instagram | ⏳ **pendente de credencial** | depende de App Review da Meta (Graph API) |
-| Facebook | ⏳ **pendente de credencial** | depende de App Review da Meta (Graph API) |
-
-> Anote aqui o id/URL retornado por cada validação conforme sair. Um canal que **falhar** (não
-> "pendente") sai do catálogo removendo-o de `supportedPlatforms()`.
+Há um harness (`pnpm validate:channel`) que publica de verdade num canal para validar o caminho real,
+parametrizado por credencial. Um canal que falhar de fato (≠ "pendente de credencial") sai do catálogo
+removendo-o de `supportedPlatforms()`. Detalhes de uso ficam na doc operacional interna.
 
 ## Permissões do token (publicação + métricas)
 
@@ -82,16 +55,10 @@ Assistente sem dados). Tokens do Meta/LinkedIn **expiram (~60 dias)** — use se
 ## OAuth + refresh automático (o cliente conecta 1x)
 
 Além do colar-token manual, o canal social pode ser conectado via **OAuth**: o cliente autoriza uma
-vez em `/motor/canais` ("Conectar via OAuth") e a Sapienza passa a **renovar o token sozinha**
-(refresh antes de publicar/coletar + cron diário `refresh-tokens`). Guardamos `token_expires_at` +
-`refresh_token_enc` em `motor_channels` (migration 0016). Meta: code → user token de longa duração →
-page token (IG/FB); refresh via `fb_exchange_token`. LinkedIn: code → access+refresh; `grant_type=
-refresh_token`.
+vez em `/motor/canais` e a Sapienza passa a **renovar o token sozinha**. É um **seam** — sem o app OAuth
+configurado, o botão fica indisponível e o colar-token manual continua funcionando.
 
-**Ligar (seam):** definir no motor `META_APP_ID/META_APP_SECRET`, `LINKEDIN_CLIENT_ID/LINKEDIN_CLIENT_SECRET`
-e `OAUTH_REDIRECT_BASE` (URL do console), e **registrar o redirect**
-`OAUTH_REDIRECT_BASE/motor/canais/oauth/callback` nos apps Meta e LinkedIn. Em produção os escopos só
-são concedidos após o **App Review da Meta**. Sem as envs, o botão OAuth some e o colar-JSON continua.
+> A configuração do app/secret e do redirect é infra operacional e vive na doc interna (não versionada).
 
 ## Métricas (Bloco D)
 
