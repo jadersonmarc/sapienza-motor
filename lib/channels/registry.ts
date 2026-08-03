@@ -170,6 +170,42 @@ export async function connectChannel(
   })
 }
 
+/** Conecta/atualiza um canal via OAuth: grava a credencial de trabalho + o ciclo de
+ *  vida do token (expiração + material de refresh, cifrado). Respeita o limite de
+ *  canais sociais do plano (igual ao connectChannel). Usado pelo callback OAuth e
+ *  pelo refresh (que passa `enforceLimit=false`, pois o canal já está conectado). */
+export async function storeChannelToken(
+  sql: Sql,
+  tenantId: string,
+  platform: Platform,
+  token: { credentials: string; expiresAt: Date | null; refreshToken: string | null },
+  enforceLimit = true,
+): Promise<void> {
+  const limit = await channelLimit(sql, tenantId)
+  const credEnc = encryptSecret(token.credentials)
+  const refreshEnc = token.refreshToken ? encryptSecret(token.refreshToken) : null
+  const expiresAt = token.expiresAt ? token.expiresAt.toISOString() : null
+  await withTenant(sql, tenantId, async (tx) => {
+    if (enforceLimit) {
+      const enabled = (await tx`SELECT platform FROM motor_channels WHERE enabled = true`) as unknown as { platform: Platform }[]
+      const already = enabled.some((c) => c.platform === platform)
+      const socialUsed = enabled.filter((c) => isCounted(c.platform)).length
+      if (!already && isCounted(platform) && socialUsed >= limit) {
+        throw new ChannelLimitError(
+          `seu plano permite ${limit} canal(is) social(is). Desconecte um para trocar, ou faça upgrade para conectar mais.`,
+        )
+      }
+    }
+    await tx`
+      INSERT INTO motor_channels (platform, credentials_enc, token_expires_at, refresh_token_enc, enabled)
+      VALUES (${platform}, ${credEnc}, ${expiresAt}, ${refreshEnc}, true)
+      ON CONFLICT (platform) DO UPDATE
+        SET credentials_enc = ${credEnc}, token_expires_at = ${expiresAt},
+            refresh_token_enc = ${refreshEnc}, enabled = true, updated_at = now()
+    `
+  })
+}
+
 /** Desconecta um canal: libera o slot do tier e zera a credencial guardada.
  *  Desabilita (não deleta) — `channelLimit` só conta enabled=true, então o slot
  *  volta; reconectar reusa a linha via ON CONFLICT. Zerar o token evita deixar
