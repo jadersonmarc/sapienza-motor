@@ -333,6 +333,24 @@ maybe("motor data plane", () => {
     expect(stateAfterRetry.map((r) => r.status)).toEqual(["sent"])
   })
 
+  it("fan-out: cada canal recebe o aspecto certo (instagram→9x16; webhook→principal)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const item = await newItem(t, `mo-${randomUUID()}`, "instagram")
+    await withTenant(sql, t, (tx) =>
+      tx`UPDATE content_items SET is_motion = true, video_url = 'PRIMARY',
+             video_urls = ${tx.json({ "9x16": "V916", "1x1": "V11" })}
+           WHERE id = ${item.id}`,
+    )
+    await connectChannel(sql, t, "instagram", "c")
+    await connectChannel(sql, t, "webhook", JSON.stringify({ url: "https://x", secret: "s" }))
+    const ig = new MockChannel("instagram")
+    const wh = new MockChannel("webhook")
+    const drivers = { instagram: ig, webhook: wh } as unknown as Drivers
+    await publishItem(sql, t, item.id, drivers)
+    expect(ig.published[0].input.videoUrl).toBe("V916") // Instagram → Reels vertical
+    expect(wh.published[0].input.videoUrl).toBe("PRIMARY") // webhook → formato principal (sem preferência)
+  })
+
   it("publishItem: publica no canal (mock) e fatura 1 peça", async () => {
     const t = await provisionTenant(sql, "pro")
     const item = await newItem(t, "pub")

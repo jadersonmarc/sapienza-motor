@@ -52,6 +52,23 @@ export async function connectedFormats(sql: Sql, tenantId: string): Promise<("bl
   )
 }
 
+// Roteamento de formato por canal (fan-out): manda o aspecto certo p/ cada destino.
+// Instagram = Reels/Stories vertical (9x16); LinkedIn/Facebook = feed quadrado (1x1).
+// Fallback = o formato principal (video_url) quando o preferido não foi renderizado.
+const PREFERRED_ASPECT: Partial<Record<Platform, string>> = {
+  instagram: "9x16",
+  linkedin: "1x1",
+  facebook: "1x1",
+}
+function videoUrlFor(
+  platform: Platform,
+  videoUrls: Record<string, string> | null,
+  primary: string | undefined,
+): string | undefined {
+  const pref = PREFERRED_ASPECT[platform]
+  return (pref && videoUrls?.[pref]) || primary
+}
+
 export class ChannelLimitError extends Error {}
 
 /**
@@ -263,9 +280,9 @@ export async function publishItem(
   // abaixo pega o token fresco. Best-effort (não trava a publicação).
   await refreshExpiringChannels(sql, tenantId).catch(() => {})
   // Conteúdo atual + slug + canais + rascunhos sociais, numa leitura tenant-scoped.
-  const { slug, title, body, videoUrl, alreadyPublished, channels, socialByPlatform, sentPlatforms } = await withTenant(sql, tenantId, async (tx) => {
+  const { slug, title, body, videoUrl, videoUrls, alreadyPublished, channels, socialByPlatform, sentPlatforms } = await withTenant(sql, tenantId, async (tx) => {
     const [item] = (await tx`
-      SELECT ci.slug, ci.format, ci.is_motion, ci.video_url, ci.published_at, cr.title, cr.body_markdown
+      SELECT ci.slug, ci.format, ci.is_motion, ci.video_url, ci.video_urls, ci.published_at, cr.title, cr.body_markdown
         FROM content_items ci
         JOIN content_revisions cr ON cr.id = ci.current_revision_id
        WHERE ci.id = ${itemId}
@@ -274,6 +291,7 @@ export async function publishItem(
       format: string
       is_motion: boolean
       video_url: string | null
+      video_urls: Record<string, string> | null
       published_at: string | null
       title: string
       body_markdown: string
@@ -308,6 +326,7 @@ export async function publishItem(
       title: item.title,
       body: item.body_markdown,
       videoUrl: item.video_url ?? undefined,
+      videoUrls: item.video_urls,
       alreadyPublished: item.published_at != null,
       channels,
       socialByPlatform,
@@ -355,7 +374,10 @@ export async function publishItem(
     const creds = ch.credentials_enc ? decryptSecret(ch.credentials_enc) : null
     const channelBody = bodyFor(ch.platform)
     try {
-      const { url } = await driver.publish({ slug, title, body: channelBody, imageUrl, videoUrl }, creds)
+      const { url } = await driver.publish(
+        { slug, title, body: channelBody, imageUrl, videoUrl: videoUrlFor(ch.platform, videoUrls, videoUrl) },
+        creds,
+      )
       results.push({ platform: ch.platform, url })
       await recordSent(sql, tenantId, itemId, ch.platform, channelBody, imageUrl, url)
     } catch (e) {
@@ -409,7 +431,7 @@ export async function retryFailedChannels(
 ): Promise<{ published: { platform: Platform; url: string }[]; failures: { platform: Platform; error: string }[] }> {
   const ctx = await withTenant(sql, tenantId, async (tx) => {
     const [item] = (await tx`
-      SELECT ci.slug, ci.format, ci.is_motion, ci.video_url, ci.published_at, cr.title, cr.body_markdown
+      SELECT ci.slug, ci.format, ci.is_motion, ci.video_url, ci.video_urls, ci.published_at, cr.title, cr.body_markdown
         FROM content_items ci
         JOIN content_revisions cr ON cr.id = ci.current_revision_id
        WHERE ci.id = ${itemId}
@@ -418,6 +440,7 @@ export async function retryFailedChannels(
       format: string
       is_motion: boolean
       video_url: string | null
+      video_urls: Record<string, string> | null
       published_at: string | null
       title: string
       body_markdown: string
@@ -444,6 +467,7 @@ export async function retryFailedChannels(
       title: item.title,
       body: item.body_markdown,
       videoUrl: item.video_url ?? undefined,
+      videoUrls: item.video_urls,
       channels,
       socialByPlatform: new Map(drafts.map((d) => [d.platform, d])),
       sentSet: new Set(sent.map((s) => s.platform)),
@@ -467,7 +491,7 @@ export async function retryFailedChannels(
     const channelBody = bodyFor(ch.platform)
     try {
       const { url } = await driver.publish(
-        { slug: ctx.slug, title: ctx.title, body: channelBody, imageUrl, videoUrl: ctx.videoUrl },
+        { slug: ctx.slug, title: ctx.title, body: channelBody, imageUrl, videoUrl: videoUrlFor(ch.platform, ctx.videoUrls, ctx.videoUrl) },
         creds,
       )
       published.push({ platform: ch.platform, url })
