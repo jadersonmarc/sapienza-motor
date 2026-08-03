@@ -1,0 +1,17 @@
+name: Cron · renovar tokens de canal
+
+# Renova os tokens OAuth dos canais perto de expirar (o cliente conecta uma vez; a
+# Sapienza mantém o token vivo). Seam: sem app OAuth configurado, é no-op. 1×/dia.
+# Secrets: MOTOR_URL, WEBHOOK_SECRET.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.MOTOR_URL }}/api/cron/refresh-tokens" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"

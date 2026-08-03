@@ -1,6 +1,7 @@
 import type { Sql, Tx } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { decryptSecret } from "@/lib/platform/crypto"
+import { refreshExpiringChannels } from "@/lib/channels/registry"
 import { currentDay, currentPeriod } from "@/lib/platform/period"
 import type { Platform } from "@/lib/channels/types"
 
@@ -190,6 +191,7 @@ export async function collectMetrics(
   now: Date = new Date(),
 ): Promise<{ scanned: number; written: number; failures: { itemId: string; platform: string; error: string }[] }> {
   const day = currentDay(now)
+  await refreshExpiringChannels(sql, tenantId).catch(() => {}) // token fresco antes de coletar
   const { posts, credByPlatform } = await withTenant(sql, tenantId, async (tx) => {
     const posts = (await tx`
       SELECT sd.content_item_id, sd.platform, sd.post_url
@@ -251,6 +253,7 @@ export async function collectChannelMetrics(
   now: Date = new Date(),
 ): Promise<{ written: number; failures: { platform: string; error: string }[] }> {
   const day = currentDay(now)
+  await refreshExpiringChannels(sql, tenantId).catch(() => {}) // token fresco antes de coletar
   const channels = await withTenant(sql, tenantId, async (tx) => {
     return (await tx`
       SELECT platform, credentials_enc FROM motor_channels WHERE enabled = true

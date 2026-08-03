@@ -7,6 +7,7 @@ import { emitContentPublishFailed } from "@/lib/platform/events"
 import { assertPublishAllowed } from "@/lib/content/quota"
 import type { Channel, Platform } from "./types"
 import { isCounted } from "./types"
+import { isOAuthConfigured, refresh as oauthRefresh } from "./oauth"
 import {
   BlogChannel,
   InstagramChannel,
@@ -206,6 +207,36 @@ export async function storeChannelToken(
   })
 }
 
+// Renova o token se estiver perto de expirar (janela de 7 dias). Best-effort: erro
+// de refresh loga e segue (o token atual ainda pode estar válido). Só age em canais
+// OAuth com material de refresh — o colar-JSON manual (sem refresh) é ignorado.
+const REFRESH_WINDOW_MS = 7 * 86400_000
+
+export async function refreshIfNeeded(sql: Sql, tenantId: string, platform: Platform): Promise<void> {
+  if (!isOAuthConfigured(platform)) return
+  const [row] = (await withTenant(sql, tenantId, (tx) =>
+    tx`SELECT token_expires_at, refresh_token_enc FROM motor_channels WHERE platform = ${platform} AND enabled = true`,
+  )) as unknown as { token_expires_at: string | null; refresh_token_enc: string | null }[]
+  if (!row?.refresh_token_enc || !row.token_expires_at) return
+  if (new Date(row.token_expires_at).getTime() - Date.now() > REFRESH_WINDOW_MS) return // ainda longe de expirar
+  try {
+    const token = await oauthRefresh(platform, decryptSecret(row.refresh_token_enc))
+    await storeChannelToken(sql, tenantId, platform, token, false)
+    console.log(`[oauth] token de ${platform} renovado (tenant ${tenantId})`)
+  } catch (e) {
+    console.error(`[oauth] falha ao renovar ${platform} (tenant ${tenantId}):`, e instanceof Error ? e.message : e)
+  }
+}
+
+/** Renova (se perto de expirar) todos os canais OAuth conectados do tenant. Chamado
+ *  antes de publicar/coletar e pelo cron refresh-tokens. */
+export async function refreshExpiringChannels(sql: Sql, tenantId: string): Promise<void> {
+  const channels = (await withTenant(sql, tenantId, (tx) =>
+    tx`SELECT platform FROM motor_channels WHERE enabled = true AND refresh_token_enc IS NOT NULL`,
+  )) as unknown as { platform: Platform }[]
+  for (const c of channels) await refreshIfNeeded(sql, tenantId, c.platform)
+}
+
 /** Desconecta um canal: libera o slot do tier e zera a credencial guardada.
  *  Desabilita (não deleta) — `channelLimit` só conta enabled=true, então o slot
  *  volta; reconectar reusa a linha via ON CONFLICT. Zerar o token evita deixar
@@ -228,6 +259,9 @@ export async function publishItem(
   drivers: Drivers = defaultDrivers(),
   imageUrl?: string,
 ): Promise<{ platform: Platform; url: string }[]> {
+  // Renova tokens OAuth perto de expirar ANTES de ler as credenciais — a leitura
+  // abaixo pega o token fresco. Best-effort (não trava a publicação).
+  await refreshExpiringChannels(sql, tenantId).catch(() => {})
   // Conteúdo atual + slug + canais + rascunhos sociais, numa leitura tenant-scoped.
   const { slug, title, body, videoUrl, alreadyPublished, channels, socialByPlatform, sentPlatforms } = await withTenant(sql, tenantId, async (tx) => {
     const [item] = (await tx`
