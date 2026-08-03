@@ -79,9 +79,19 @@ Assistente sem dados). Tokens do Meta/LinkedIn **expiram (~60 dias)** — use se
 | Facebook | `pages_manage_posts`, `pages_read_engagement`, `pages_show_list` | `read_insights` (fan_count já vem em `pages_read_engagement`) | Page Token de longa duração (~60d) |
 | LinkedIn | `w_member_social`, `openid`, `profile` | **sem métrica por post** (perfil pessoal — limitação da API) | access_token ~60d |
 
-Hoje o token é colado manualmente (cifrado em `motor_channels`) e renovado à mão. O mecanismo
-**OAuth + refresh automático** (o cliente conecta uma vez, a Sapienza renova sozinha) está desenhado
-em `~/.claude/plans/ethereal-honking-balloon.md` (Fase 2 — depende de apps OAuth + App Review da Meta).
+## OAuth + refresh automático (o cliente conecta 1x)
+
+Além do colar-token manual, o canal social pode ser conectado via **OAuth**: o cliente autoriza uma
+vez em `/motor/canais` ("Conectar via OAuth") e a Sapienza passa a **renovar o token sozinha**
+(refresh antes de publicar/coletar + cron diário `refresh-tokens`). Guardamos `token_expires_at` +
+`refresh_token_enc` em `motor_channels` (migration 0016). Meta: code → user token de longa duração →
+page token (IG/FB); refresh via `fb_exchange_token`. LinkedIn: code → access+refresh; `grant_type=
+refresh_token`.
+
+**Ligar (seam):** definir no motor `META_APP_ID/META_APP_SECRET`, `LINKEDIN_CLIENT_ID/LINKEDIN_CLIENT_SECRET`
+e `OAUTH_REDIRECT_BASE` (URL do console), e **registrar o redirect**
+`OAUTH_REDIRECT_BASE/motor/canais/oauth/callback` nos apps Meta e LinkedIn. Em produção os escopos só
+são concedidos após o **App Review da Meta**. Sem as envs, o botão OAuth some e o colar-JSON continua.
 
 ## Métricas (Bloco D)
 
