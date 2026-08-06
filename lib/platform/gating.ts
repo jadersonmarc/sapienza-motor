@@ -59,8 +59,11 @@ export async function productRules(sql: Sql): Promise<Record<string, unknown>> {
 export async function channelLimit(sql: Sql, tenantId: string): Promise<number> {
   const tier = await tierOf(sql, tenantId)
   if (!tier) return 0
+  // plans tem uma linha por MODELO (anual/mensal); o limite de canais é idêntico
+  // nos dois — LIMIT 1 evita duplicar sem depender do modelo do tenant.
   const rows = (await sql`
-    SELECT COALESCE(canais, 0) AS canais FROM public.plans WHERE produto = ${PRODUTO} AND tier = ${tier}
+    SELECT COALESCE(canais, 0) AS canais FROM public.plans
+     WHERE produto = ${PRODUTO} AND tier = ${tier} LIMIT 1
   `) as unknown as { canais: number }[]
   return rows[0]?.canais ?? 0
 }

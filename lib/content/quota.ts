@@ -29,9 +29,10 @@ export { currentPeriod }
 export async function planIncluso(sql: Sql, tenantId: string): Promise<number> {
   const tier = await tierOf(sql, tenantId)
   if (!tier) return 0
+  // Uma linha por modelo (anual/mensal); `incluso` é idêntico — LIMIT 1.
   const rows = (await sql`
     SELECT COALESCE(incluso, 0) AS incluso FROM public.plans
-     WHERE produto = ${PRODUTO} AND tier = ${tier}
+     WHERE produto = ${PRODUTO} AND tier = ${tier} LIMIT 1
   `) as unknown as { incluso: number }[]
   return rows[0]?.incluso ?? 0
 }
