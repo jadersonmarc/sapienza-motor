@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate, motionEnabled } from "@/lib/platform/gating"
 import { createMotionItem, addRevision, setMotionMeta, finishGenerating, setRenderStatus } from "@/lib/content/store"
-import { getEditorConfig } from "@/lib/content/editor-config"
+import { assertReadyToCreate, connectedPlatforms, NotReadyError } from "@/lib/content/readiness"
 import { generateMotion } from "@/lib/ai/motion"
 import { MOTION_ARCHETYPES, type MotionArchetype } from "@/lib/content/motion-types"
 import { MOTION_MOODS, type MotionMood } from "@/lib/content/motion-audio"
@@ -48,9 +48,24 @@ export async function POST(req: Request): Promise<Response> {
 
   const body = (await req.json().catch(() => ({}))) as { prompt?: string; channel?: string; archetype?: string; audio?: string }
   const prompt = (body.prompt ?? "").trim()
-  // Canal-alvo do vídeo (define o formato da peça). Fase 1 publica só pelo Webhook;
-  // na Fase 2 o publish nativo usa este canal (instagram/linkedin).
+  // Canal-alvo do vídeo (define o formato da peça). Fase 1 publica pelo Webhook;
+  // a Fase 2 publica nativo no canal (instagram/linkedin).
   const channel = body.channel === "linkedin" ? "linkedin" : "instagram"
+
+  // Pronto para criar? (identidade do agente + ≥1 canal). Voz/tom vêm daqui.
+  const ready = await assertReadyToCreate(sql, a.tenantId).catch((e) => {
+    if (e instanceof NotReadyError) return json(409, { error: e.message })
+    throw e
+  })
+  if (ready instanceof Response) return ready
+  const { cfg } = ready
+  // O vídeo precisa de um DESTINO conectado: o canal escolhido (nativo) ou o Webhook
+  // (Fase 1). Sem isso, não cria — antes ele nascia "para o instagram" sem canal.
+  const platforms = await connectedPlatforms(sql, a.tenantId)
+  if (!platforms.has(channel) && !platforms.has("webhook")) {
+    return json(409, { error: `Conecte o canal ${channel} (ou o Webhook) antes de criar peças em vídeo.` })
+  }
+
   // Preferências opcionais da UI (validadas em generateMotion; inválido = automático).
   const archetype = MOTION_ARCHETYPES.includes(body.archetype as MotionArchetype) ? (body.archetype as MotionArchetype) : undefined
   const audio = MOTION_MOODS.includes(body.audio as MotionMood) ? (body.audio as MotionMood) : undefined
@@ -63,7 +78,6 @@ export async function POST(req: Request): Promise<Response> {
     throw e
   }
 
-  const cfg = await withTenant(sql, a.tenantId, (tx) => getEditorConfig(tx))
   const slug = `${slugify(prompt) || "motion"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
     createMotionItem(tx, { slug, format: channel, authorId: a.userId }),

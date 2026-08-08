@@ -15,6 +15,8 @@ export type SocialImageInput = {
   pilar?: Pilar
   archetype?: ArchetypeId
   formatId?: FormatId
+  /** Rodapé de marca (handle do cliente). Vazio = sem rodapé (nunca uma marca padrão). */
+  footer?: string
 }
 
 export function isImageConfigured(): boolean {
@@ -31,6 +33,7 @@ export async function renderSocialImage(
     formatId,
     pilar: input.pilar ?? null,
     text: input.title,
+    footer: input.footer,
   })
   const res = renderBrandImage(format, node)
   const buffer = Buffer.from(await res.arrayBuffer())

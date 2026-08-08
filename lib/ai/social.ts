@@ -50,9 +50,9 @@ function block(i: SocialInput): string {
 }
 
 const BASE =
-  "Você cuida das redes da Sapienza Labs, startup de inteligência artificial que constrói " +
-  "produtos de software que operam online. Escreva em pt-BR, natural e específico. Inclua um " +
-  "CTA para o link/WhatsApp. Retorne hashtags sem o caractere #."
+  "Você cuida das redes da MARCA descrita nas instruções abaixo (não represente nem cite outra " +
+  "empresa). Escreva em pt-BR, natural e específico. Inclua um CTA leve e coerente com a marca. " +
+  "Retorne hashtags sem o caractere #."
 
 const generators: Record<SocialPlatform, SocialGenerator> = {
   instagram: {

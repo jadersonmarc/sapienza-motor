@@ -4,7 +4,7 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
 import { createGeneratingItem, addRevision, finishGenerating, listItems } from "@/lib/content/store"
 import { generatePieceImage } from "@/lib/content/piece-image"
-import { getEditorConfig } from "@/lib/content/editor-config"
+import { assertReadyToCreate, NotReadyError } from "@/lib/content/readiness"
 import { generateDraft, type ContentFormat } from "@/lib/ai/generate"
 
 const FORMATS: ContentFormat[] = ["blog", "linkedin", "instagram"]
@@ -39,6 +39,18 @@ export async function POST(req: Request): Promise<Response> {
     ? (body.format as ContentFormat)
     : "blog"
 
+  // Pronto para criar? (identidade do agente + canal conectado). Voz/tom vêm daqui.
+  const ready = await assertReadyToCreate(sql, a.tenantId).catch((e) => {
+    if (e instanceof NotReadyError) return json(409, { error: e.message })
+    throw e
+  })
+  if (ready instanceof Response) return ready
+  const { cfg, formats } = ready
+  // O formato escolhido precisa ter um canal conectado (senão a peça nasce sem destino).
+  if (!formats.includes(format)) {
+    return json(409, { error: `Conecte um canal de ${format} antes de criar peças nesse formato (conectados: ${formats.join(", ")}).` })
+  }
+
   // Debita a cota antes de agendar o modelo — é a chamada que custa (refund na falha).
   try {
     await reserveGeneration(sql, a.tenantId)
@@ -47,8 +59,6 @@ export async function POST(req: Request): Promise<Response> {
     throw e
   }
 
-  // Voz/tom/modelo do agente (aba "Agente") — o formato segue o escolhido aqui.
-  const cfg = await withTenant(sql, a.tenantId, (tx) => getEditorConfig(tx))
   const slug = `${slugify(prompt) || "rascunho"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
     createGeneratingItem(tx, { slug, format, authorId: a.userId }),

@@ -10,7 +10,7 @@ export function Frame({
   field,
   eyebrow,
   footer,
-  footerRight = "sapienzalabs.com.br",
+  footerRight = "",
   backdrop,
   children,
 }: {

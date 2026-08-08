@@ -13,6 +13,8 @@ export type BriefInput = {
   publico?: string
   tom?: string
   pilar?: string | null
+  /** Identidade/voz da marca (persona do Agente) — define de quem é o conteúdo. */
+  systemPrompt?: string
 }
 
 export type BriefDraft = {
@@ -38,7 +40,8 @@ const SCHEMA = {
 } as const
 
 const SYSTEM =
-  "Você é redator(a) da Sapienza Labs (pt-BR), startup de inteligência artificial. Conteúdo " +
+  "Você é redator(a) profissional escrevendo para a MARCA descrita nas instruções abaixo (pt-BR). " +
+  "Adote a identidade dessa marca — não represente nem cite outra empresa. Conteúdo " +
   "original, útil e específico — sem clichês de IA. Não invente dados ou clientes."
 
 // Monta o prompt do usuário a partir do brief (parte pura, testável).
@@ -73,13 +76,17 @@ export async function generateFromBrief(input: BriefInput): Promise<BriefDraft> 
     }
   }
 
+  // Identidade da marca (persona do Agente) entra no system — o conteúdo é DELA.
+  const persona = (input.systemPrompt ?? "").trim()
+  const system = persona ? `${SYSTEM}\n\nInstruções da marca:\n${persona}` : SYSTEM
+
   const { data, model } = await callStructured<{
     title: string
     slug: string
     excerpt: string
     bodyMarkdown: string
     keywords: string[]
-  }>({ system: SYSTEM, user: buildBriefUser(input), schema: SCHEMA, maxTokens: 16000 })
+  }>({ system, user: buildBriefUser(input), schema: SCHEMA, maxTokens: 16000 })
 
   return {
     title: data.title.trim(),

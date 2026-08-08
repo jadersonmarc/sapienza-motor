@@ -42,6 +42,11 @@ export async function POST(req: Request): Promise<Response> {
         skipped.push({ tenantId, reason: "automação desligada" })
         continue
       }
+      // Sem identidade da marca definida (persona), não gera — não há marca padrão.
+      if (!cfg.system_prompt.trim()) {
+        skipped.push({ tenantId, reason: "agente sem identidade configurada" })
+        continue
+      }
       // Formato orientado aos canais conectados: usa o configurado se o canal
       // dele está conectado; se não, e há só UM canal, usa o dele; se há vários
       // (ou nenhum), pula — o cliente precisa definir o formato padrão.

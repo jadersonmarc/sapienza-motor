@@ -1,6 +1,7 @@
 import type { Sql } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { getItem, getItemWithRevision, setItemImage } from "./store"
+import { getEditorConfig } from "./editor-config"
 import { generateAndStoreCover, isImageConfigured } from "@/lib/brand/social-image"
 import type { FormatId } from "@/lib/brand/formats"
 
@@ -24,15 +25,21 @@ export async function generatePieceImage(sql: Sql, tenantId: string, id: string)
   const info = await withTenant(sql, tenantId, async (tx) => {
     const item = await getItem(tx, id)
     const rev = await getItemWithRevision(tx, id)
-    return item && rev ? { slug: item.slug, pilar: item.pilar, format: item.format, title: rev.title } : null
+    const cfg = await getEditorConfig(tx)
+    return item && rev
+      ? { slug: item.slug, pilar: item.pilar, format: item.format, title: rev.title, handle: cfg.handle }
+      : null
   })
   if (!info) return null
   const formatId = COVER_FORMAT[info.format] ?? "ig-feed"
+  // Rodapé de marca = handle do cliente (vazio → sem rodapé; nunca "SAPIENZA LABS").
+  const footer = info.handle.trim() ? info.handle.trim().toUpperCase() : undefined
   const url = await generateAndStoreCover(tenantId, {
     slug: info.slug,
     title: info.title,
     pilar: info.pilar,
     formatId,
+    footer,
   })
   if (url) await withTenant(sql, tenantId, (tx) => setItemImage(tx, id, url))
   return url

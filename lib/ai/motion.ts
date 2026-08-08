@@ -53,10 +53,10 @@ export type MotionBrief = {
 }
 
 const BASE_SYSTEM =
-  "Você cria peças de conteúdo em MOVIMENTO (vídeo curto animado) para a Sapienza Labs, " +
-  "startup de inteligência artificial. Escreva em pt-BR correto e natural. Conteúdo original, " +
-  "útil e específico — sem clichês de IA. **Nunca invente dados, estatísticas, percentuais, " +
-  "números ou clientes.**"
+  "Você cria peças de conteúdo em MOVIMENTO (vídeo curto animado) para a MARCA descrita nas " +
+  "instruções abaixo (não represente nem cite outra empresa). Escreva em pt-BR correto e natural. " +
+  "Conteúdo original, útil e específico — sem clichês de IA. **Nunca invente dados, estatísticas, " +
+  "percentuais, números ou clientes.**"
 
 // Compõe o system: guardrails base + voz da marca + tom do tenant (mesma lógica de generate.ts).
 function composeSystem(brief: MotionBrief, allowStat: boolean): string {
@@ -279,7 +279,7 @@ export function buildStory(
   prompt: string,
 ): StoryProps {
   const hookWords = (raw.hook_words ?? []).map((w) => w.trim()).filter(Boolean).slice(0, 5)
-  const fallbackHook = (prompt.trim().split(/\s+/).filter(Boolean).slice(0, 4).join(" ") || "Sapienza").split(/\s+/)
+  const fallbackHook = (prompt.trim().split(/\s+/).filter(Boolean).slice(0, 4).join(" ") || "Novidade").split(/\s+/)
   const hookScene: MotionScene = {
     role: "hook",
     durSec: HOOK_SEC,
@@ -344,9 +344,9 @@ async function callMotion(brief: MotionBrief, prompt: string, allowStat: boolean
 /** Stub determinístico sem IA (opera/testa sem ANTHROPIC_API_KEY). Roteiro mínimo
  *  (hook → manchete → CTA), NUNCA com `stat` (não há número verificável). */
 function fallback(prompt: string): MotionContent {
-  const theme = prompt.trim() || "Conteúdo Sapienza Labs"
+  const theme = prompt.trim() || "Novidade da marca"
   const words = theme.split(/\s+/).filter(Boolean).slice(0, 4)
-  const safeWords = words.length ? words : ["Sapienza", "Labs"]
+  const safeWords = words.length ? words : ["Novidade", "da", "marca"]
   const develop: SceneBlock = { kind: "headline", words: safeWords, highlightIndex: 0 }
   return {
     preset: "story",

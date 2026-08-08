@@ -38,7 +38,9 @@ export function composeBrandImage(input: ComposeInput): { format: Format; node: 
   const format = getFormat(input.formatId)
   const { tag, field: pilarField } = pillarStyle(input.pilar)
   const field = input.field ?? pilarField
-  const footer = input.footer ?? "SAPIENZA LABS"
+  // Sem default de marca: rodapé vazio quando o chamador não passa o handle do
+  // cliente — nunca cai numa marca padrão (identidade é sempre do tenant).
+  const footer = input.footer ?? ""
 
   switch (input.archetype) {
     case "conceito":
@@ -59,7 +61,7 @@ export function composeBrandImage(input: ComposeInput): { format: Format; node: 
         }),
       }
     case "bastidores":
-      return { format, node: Bastidores({ format, imageUrl: input.imageUrl ?? "", caption: input.caption ?? input.text }) }
+      return { format, node: Bastidores({ format, imageUrl: input.imageUrl ?? "", caption: input.caption ?? input.text, footer }) }
     case "capa":
     default:
       return { format, node: CapaEditorial({ format, field, eyebrow: tag, title: input.text, footer }) }

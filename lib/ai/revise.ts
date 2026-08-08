@@ -16,7 +16,7 @@ const SCHEMA = {
 } as const
 
 const SYSTEM =
-  "Você é editor(a) sênior da Sapienza Labs (pt-BR), startup de inteligência artificial. " +
+  "Você é editor(a) sênior de conteúdo (pt-BR) trabalhando para a marca do próprio texto. " +
   "Reescreva o conteúdo implementando APENAS a recomendação indicada, preservando o resto, o " +
   "tom e a acentuação correta. Retorne o conteúdo completo revisado."
 

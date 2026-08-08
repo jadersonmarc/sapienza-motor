@@ -38,6 +38,21 @@ function req(method: string, url: string, tok?: string, body?: unknown): Request
   })
 }
 
+// Deixa o tenant PRONTO para criar peças: define a identidade (persona) e conecta
+// os canais informados. Sem isso, os endpoints de criação bloqueiam (409) — de
+// propósito (exigem agente configurado + canal). Devolve o token (owner).
+async function readyToCreate(t: string, channels: string[] = ["blog"]): Promise<string> {
+  const tok = await token(t)
+  const { PUT } = await import("@/app/api/v1/config/route")
+  await PUT(req("PUT", "/api/v1/config", tok, { system_prompt: "Marca de teste — escreva de forma clara e específica." }))
+  const { POST } = await import("@/app/api/v1/channels/route")
+  for (const p of channels) {
+    const credentials = p === "webhook" ? JSON.stringify({ url: "https://x", secret: "s" }) : "c"
+    await POST(req("POST", "/api/v1/channels", tok, { platform: p, credentials }))
+  }
+  return tok
+}
+
 maybe("motor API", () => {
   let sql: Sql
   beforeAll(async () => {
@@ -245,7 +260,7 @@ maybe("motor API", () => {
 
   it("cota de geração: a criação além do plano responde 409", async () => {
     const t = await provisionTenant(sql, "start") // incluso = 12
-    const tok = await token(t)
+    const tok = await readyToCreate(t) // persona + canal (blog) — pré-requisito de criação
     const { POST } = await import("@/app/api/v1/content/route")
     for (let i = 0; i < 12; i++) {
       // Geração roda em background: a criação responde 202 (a cota é debitada síncrono).
@@ -272,7 +287,7 @@ maybe("motor API", () => {
 
   it("cria peça com o format do canal (linkedin)", async () => {
     const t = await provisionTenant(sql)
-    const tok = await token(t)
+    const tok = await readyToCreate(t, ["linkedin"]) // persona + canal do formato
     const { POST } = await import("@/app/api/v1/content/route")
     const res = await POST(req("POST", "/api/v1/content", tok, { prompt: "tema de teste", format: "linkedin" }))
     expect(res.status).toBe(202) // criada já; rascunho gerado em background
@@ -285,6 +300,33 @@ maybe("motor API", () => {
     // fora de request scope o rascunho é gerado inline → termina generating=false com revisão
     expect(detail.generating).toBe(false)
     expect(detail.revision).not.toBeNull()
+  })
+
+  it("bloqueia criar peça sem identidade do agente / sem canal (409)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t) // sem persona e sem canal
+    const { POST } = await import("@/app/api/v1/content/route")
+    // 1) sem identidade do agente → 409
+    let res = await POST(req("POST", "/api/v1/content", tok, { prompt: "x" }))
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { error: string }).error).toMatch(/identidade/i)
+    // 2) com identidade, mas ainda sem canal → 409
+    const { PUT } = await import("@/app/api/v1/config/route")
+    await PUT(req("PUT", "/api/v1/config", tok, { system_prompt: "Marca X" }))
+    res = await POST(req("POST", "/api/v1/content", tok, { prompt: "x" }))
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { error: string }).error).toMatch(/canal/i)
+  })
+
+  it("motion: bloqueia sem canal de destino (não cria 'para o instagram' sem canal)", async () => {
+    const pro = await provisionTenant(sql, "pro")
+    const tok = await token(pro)
+    const { PUT } = await import("@/app/api/v1/config/route")
+    await PUT(req("PUT", "/api/v1/config", tok, { system_prompt: "Marca X" })) // identidade ok, sem canal
+    const { POST } = await import("@/app/api/v1/content/motion/route")
+    const res = await POST(req("POST", "/api/v1/content/motion", tok, { prompt: "webinar" }))
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { error: string }).error).toMatch(/canal|webhook/i)
   })
 
   it("motion: capability por plano — start rejeita (403), pro cria (202)", async () => {
@@ -300,7 +342,7 @@ maybe("motor API", () => {
 
     // Pro cria (202); sem IA o conteúdo cai no fallback (roteiro `story`), render fica 'queued'.
     const pro = await provisionTenant(sql, "pro")
-    const proTok = await token(pro)
+    const proTok = await readyToCreate(pro, ["instagram"]) // persona + destino do vídeo
     const res = await POST(req("POST", "/api/v1/content/motion", proTok, { prompt: "convite webinar" }))
     expect(res.status).toBe(202)
     const { id } = (await res.json()) as { id: string }
@@ -379,7 +421,7 @@ maybe("motor API", () => {
 
   it("cria peça, transiciona para published e fatura 1 peça", async () => {
     const t = await provisionTenant(sql, "pro")
-    const tok = await token(t)
+    const tok = await readyToCreate(t) // persona + canal (blog)
     const create = await import("@/app/api/v1/content/route")
     const post = await create.POST(req("POST", "/api/v1/content", tok, { prompt: "meu tema" }))
     expect(post.status).toBe(202)
@@ -394,7 +436,7 @@ maybe("motor API", () => {
 
   it("social: PUT salva a legenda editada e GET a devolve", async () => {
     const t = await provisionTenant(sql, "pro")
-    const tok = await token(t)
+    const tok = await readyToCreate(t) // persona + canal (blog)
     const create = await import("@/app/api/v1/content/route")
     const post = await create.POST(req("POST", "/api/v1/content", tok, { prompt: "tema social" }))
     const { id } = (await post.json()) as { id: string }

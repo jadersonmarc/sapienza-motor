@@ -41,7 +41,7 @@ function contentBlock(i: AnalyzerInput): string {
 }
 
 const BASE_SYSTEM =
-  "Você é editor(a) sênior da Sapienza Labs (conteúdo pt-BR). Seja específico e " +
+  "Você é editor(a) sênior de conteúdo (pt-BR). Seja específico e " +
   "acionável; nada de generalidades. Responda em pt-BR."
 
 const analyzers: Record<AnalysisType, Analyzer> = {

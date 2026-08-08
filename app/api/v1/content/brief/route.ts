@@ -4,6 +4,7 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
 import { createGeneratingItem, addRevision, finishGenerating } from "@/lib/content/store"
 import { generatePieceImage } from "@/lib/content/piece-image"
+import { assertReadyToCreate, NotReadyError } from "@/lib/content/readiness"
 import { generateFromBrief } from "@/lib/ai/brief"
 import { slugify } from "@/lib/content/slug"
 import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib/content/quota"
@@ -28,6 +29,14 @@ export async function POST(req: Request): Promise<Response> {
   const objetivo = (body.objetivo ?? "").trim()
   if (!objetivo) return json(400, { error: "objetivo obrigatório" })
 
+  // Pronto para criar? (identidade do agente + canal conectado).
+  const ready = await assertReadyToCreate(sql, a.tenantId).catch((e) => {
+    if (e instanceof NotReadyError) return json(409, { error: e.message })
+    throw e
+  })
+  if (ready instanceof Response) return ready
+  const { cfg } = ready
+
   // Debita a cota antes de agendar o modelo — é a chamada que custa (refund na falha).
   try {
     await reserveGeneration(sql, a.tenantId)
@@ -50,8 +59,9 @@ export async function POST(req: Request): Promise<Response> {
         objetivo,
         pontosChave: body.pontosChave,
         publico: body.publico,
-        tom: body.tom,
+        tom: body.tom || cfg.tone,
         pilar,
+        systemPrompt: cfg.system_prompt,
       })
       await withTenant(sql, a.tenantId, (tx) =>
         addRevision(tx, item.id, {

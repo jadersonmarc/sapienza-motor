@@ -15,7 +15,7 @@ export interface BastidoresProps {
 // Arquétipo bastidores: foto real full-bleed, esfriada/escurecida por overlay
 // sólido (sem gradiente), com a assinatura (trilho + crop) e legenda mono por cima.
 // Sempre campo ink — texto off-white, acento petrol-soft.
-export function Bastidores({ format, imageUrl, caption, eyebrow = "BASTIDORES", footer = "SAPIENZA LABS" }: BastidoresProps) {
+export function Bastidores({ format, imageUrl, caption, eyebrow = "BASTIDORES", footer = "" }: BastidoresProps) {
   const c = fieldStyle.ink
   const captionPx = Math.max(minType.support, Math.round(format.w * 0.03))
 
