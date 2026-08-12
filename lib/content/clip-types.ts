@@ -5,7 +5,7 @@
 
 export type ClipAspect = "9x16" | "16x9"
 
-export const CLIP_ASPECTS: ClipAspect[] = ["9x16", "16x9"]
+export const CLIP_ASPECT_LIST: ClipAspect[] = ["9x16", "16x9"]
 
 /** Palavra com alinhamento temporal (ms), base do karaokê e do casamento com o
  *  source_quote. Em clip_transcripts.words os tempos são absolutos (na fonte); em
