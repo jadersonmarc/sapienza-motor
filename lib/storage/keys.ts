@@ -3,7 +3,16 @@
 // mão; tudo passa por aqui. Convenção forward: chaves antigas continuam válidas.
 import type { FormatId } from "@/lib/brand/formats"
 
-export type R2Purpose = "article" | "instagram" | "linkedin" | "editor" | "page" | "geral" | "motion"
+export type R2Purpose =
+  | "article"
+  | "instagram"
+  | "linkedin"
+  | "editor"
+  | "page"
+  | "geral"
+  | "motion"
+  | "clip"
+  | "clip_raw"
 
 // Prefixo (pasta) por finalidade. `social/<plataforma>` agrupa as imagens sociais;
 // `geral` é a pasta-curinga da biblioteca para o que não se encaixa nas demais;
@@ -16,6 +25,10 @@ const PREFIX: Record<R2Purpose, string> = {
   page: "pages",
   geral: "geral",
   motion: "motion",
+  // Clipper: `clips` guarda os MP4 renderizados; `clips/raw` o vídeo-fonte bruto
+  // (retenção curta, 7d). Ficam FORA de R2_PURPOSES (não navegáveis na biblioteca).
+  clip: "clips",
+  clip_raw: "clips/raw",
 }
 
 /** Todas as finalidades navegáveis na biblioteca de mídia (ordem de exibição). */
@@ -77,6 +90,16 @@ export function mediaUploadKey(opts: { purpose: R2Purpose; uuid: string; ext: st
 /** Chave do MP4 de uma peça de motion: `motion/<slug>__<aspect>.mp4`. */
 export function motionVideoKey(opts: { slug: string; aspect: string }): string {
   return `${PREFIX.motion}/${opts.slug}__${opts.aspect}.mp4`
+}
+
+/** Chave do vídeo-fonte bruto do Clipper: `clips/raw/<sourceId>.<ext>` (retenção 7d). */
+export function clipRawKey(opts: { sourceId: string; ext: string }): string {
+  return `${PREFIX.clip_raw}/${opts.sourceId}.${opts.ext}`
+}
+
+/** Chave do MP4 de um clipe renderizado: `clips/<slug>.mp4`. */
+export function clipVideoKey(opts: { slug: string }): string {
+  return `${PREFIX.clip}/${opts.slug}.mp4`
 }
 
 /** Chave de imagem social enviada/trocada pelo operador: `social/<plataforma>/<uuid>.<ext>`. */

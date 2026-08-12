@@ -8,6 +8,7 @@
     "studio": "pnpm copy-assets && remotion studio src/index.ts",
     "sample": "pnpm copy-assets && tsx scripts/sample.ts",
     "render-worker": "pnpm copy-assets && tsx scripts/worker.ts",
+    "clip-worker": "pnpm copy-assets && tsx scripts/clip-worker.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

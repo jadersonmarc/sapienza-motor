@@ -224,6 +224,19 @@ export async function setClipSourceStatus(tx: Tx, id: string, status: string): P
   await tx`UPDATE clip_sources SET status = ${status}, updated_at = now() WHERE id = ${id}`
 }
 
+/** Devolve à fila fontes presas num estágio intermediário há mais de `staleSeconds`
+ *  (o worker caiu no meio). Reprocessar é idempotente (horas não recobram). Devolve
+ *  quantas foram recolocadas. */
+export async function requeueStaleClipSources(tx: Tx, staleSeconds: number): Promise<number> {
+  const rows = (await tx`
+    UPDATE clip_sources SET status = 'queued', claimed_at = NULL, updated_at = now()
+     WHERE status NOT IN ('queued', 'done', 'error')
+       AND updated_at < now() - (${staleSeconds} * interval '1 second')
+    RETURNING id
+  `) as unknown as { id: string }[]
+  return rows.length
+}
+
 /** Marca a fonte com erro (a esteira retoma/estorna a partir daqui). */
 export async function setClipSourceError(tx: Tx, id: string, error: string): Promise<void> {
   await tx`UPDATE clip_sources SET status = 'error', error = ${error}, updated_at = now() WHERE id = ${id}`
