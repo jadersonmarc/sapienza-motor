@@ -197,6 +197,36 @@ export async function getClipSource(tx: Tx, id: string): Promise<ClipSource | nu
   return rows[0] ?? null
 }
 
+/** Fontes do tenant, mais recentes primeiro (para a fila/lista do console). */
+export async function listClipSources(tx: Tx, limit = 50): Promise<ClipSource[]> {
+  return (await tx`
+    SELECT * FROM clip_sources ORDER BY created_at DESC LIMIT ${limit}
+  `) as unknown as ClipSource[]
+}
+
+export type ClipItemView = {
+  id: string
+  slug: string
+  title: string | null
+  status: string
+  render_status: string | null
+  clip_aspect: string | null
+  video_url: string | null
+  score: number | null
+}
+
+/** Clipes gerados a partir de uma fonte (para o detalhe/grade do console). */
+export async function listClipsForSource(tx: Tx, sourceId: string): Promise<ClipItemView[]> {
+  return (await tx`
+    SELECT ci.id, ci.slug, cr.title, ci.status, ci.render_status, ci.clip_aspect, ci.video_url,
+           (cr.clip_props->>'score')::int AS score
+      FROM content_items ci
+      LEFT JOIN content_revisions cr ON cr.id = ci.current_revision_id
+     WHERE ci.is_clip = true AND ci.clip_source_id = ${sourceId}
+     ORDER BY ci.created_at ASC
+  `) as unknown as ClipItemView[]
+}
+
 /** Reivindica atomicamente a próxima fonte num dos estágios `from`, movendo-a para
  *  `to` e marcando o lease (claimed_at). Devolve null se não houver nenhuma livre.
  *  FOR UPDATE SKIP LOCKED = duas réplicas nunca pegam a mesma fonte. */

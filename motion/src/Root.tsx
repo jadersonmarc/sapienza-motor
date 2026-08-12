@@ -31,6 +31,7 @@ const CLIP_SAMPLE: ClipCompProps["clip"] = {
   ],
   openingCard: { words: ["Você", "está", "errando"], highlightIndex: 2 },
   brandOn: true,
+  score: 90,
 }
 
 export const RemotionRoot: React.FC = () => {

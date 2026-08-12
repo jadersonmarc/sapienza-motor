@@ -65,6 +65,7 @@ export function buildClipProps(s: ClipSuggestion, transcriptWords: TranscriptWor
     words: sliceWords(transcriptWords, inMs, outMs),
     openingCard: hook ? { words: hook.split(/\s+/).slice(0, 8), highlightIndex: 0 } : undefined,
     brandOn: true,
+    score: s.score,
   }
 }
 

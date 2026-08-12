@@ -55,6 +55,8 @@ export type ClipProps = {
   openingCard?: OpeningCard
   /** aplica logo+handle do tenant (desligável por clipe). */
   brandOn: boolean
+  /** score da análise (0–100, ordenação relativa) — para ranquear na grade. */
+  score: number
 }
 
 // ── Contrato de saída da análise (SPEC §9) ────────────────────────────────────

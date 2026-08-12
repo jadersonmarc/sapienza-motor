@@ -474,6 +474,34 @@ maybe("motor API", () => {
     expect(res.status).toBe(503)
   })
 
+  it("clip: rejeita sem token; cria fonte por URL e lista", async () => {
+    const t = await provisionTenant(sql, "pro") // clipper_enabled = 1
+    const { GET, POST } = await import("@/app/api/v1/content/clip/route")
+    const tok = await token(t)
+
+    expect((await POST(req("POST", "/api/v1/content/clip"))).status).toBe(401)
+    // URL inválida → 400
+    expect((await POST(req("POST", "/api/v1/content/clip", tok, { url: "não-é-url" }))).status).toBe(400)
+    // URL válida → 202 e a fonte aparece na lista
+    const created = await POST(req("POST", "/api/v1/content/clip", tok, { url: "https://youtu.be/abc123" }))
+    expect(created.status).toBe(202)
+    const { id } = (await created.json()) as { id: string }
+    expect(id).toBeTruthy()
+
+    const list = await GET(req("GET", "/api/v1/content/clip", tok))
+    expect(list.status).toBe(200)
+    const data = (await list.json()) as { sources: { id: string; kind: string; status: string }[]; quota: { limitMinutes: number } }
+    expect(data.sources.some((s) => s.id === id && s.kind === "url" && s.status === "queued")).toBe(true)
+    expect(data.quota.limitMinutes).toBe(480) // pro = 8h
+  })
+
+  it("clip: member não pode criar (owner/admin)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const { POST } = await import("@/app/api/v1/content/clip/route")
+    const member = await token(t, { role: "member" })
+    expect((await POST(req("POST", "/api/v1/content/clip", member, { url: "https://x/y" }))).status).toBe(403)
+  })
+
   it("cron close-approval-window exige secret e promove in_review vencido", async () => {
     const t = await provisionTenant(sql, "pro")
     const item = await withTenant(sql, t, (tx) => createItem(tx, { slug: "cron", title: "C", bodyMarkdown: "x" }))
