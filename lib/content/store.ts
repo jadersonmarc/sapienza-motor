@@ -350,6 +350,49 @@ export async function listQueuedClips(tx: Tx): Promise<{ id: string; slug: strin
   `) as unknown as { id: string; slug: string; clip_aspect: string | null }[]
 }
 
+// ── Retenção / expiração (SPEC §3.8) ──────────────────────────────────────────
+
+/** Fontes cujo vídeo-fonte BRUTO já venceu (7d) e ainda têm bruto no R2. */
+export async function listExpiredClipRaw(tx: Tx): Promise<{ id: string; r2_key_raw: string }[]> {
+  return (await tx`
+    SELECT id, r2_key_raw FROM clip_sources
+     WHERE r2_key_raw IS NOT NULL AND raw_expires_at IS NOT NULL AND raw_expires_at <= now()
+  `) as unknown as { id: string; r2_key_raw: string }[]
+}
+
+/** Limpa a referência ao bruto após removê-lo do R2. */
+export async function clearClipRaw(tx: Tx, id: string): Promise<void> {
+  await tx`UPDATE clip_sources SET r2_key_raw = NULL, updated_at = now() WHERE id = ${id}`
+}
+
+/** Fontes totalmente vencidas (60d) — a remover com transcrição e clipes. */
+export async function listExpiredClipSourceIds(tx: Tx): Promise<string[]> {
+  const rows = (await tx`
+    SELECT id FROM clip_sources WHERE expires_at IS NOT NULL AND expires_at <= now()
+  `) as unknown as { id: string }[]
+  return rows.map((r) => r.id)
+}
+
+/** Remove a fonte (transcrição cai por cascade). Os clipes (content_items) são
+ *  removidos à parte pelo chamador (deleteItem + storage). */
+export async function deleteClipSource(tx: Tx, id: string): Promise<void> {
+  await tx`DELETE FROM clip_sources WHERE id = ${id}`
+}
+
+/** Fontes cujos clipes serão removidos em ~3 dias e que ainda não foram avisadas. */
+export async function listClipSourcesToWarn(tx: Tx, daysAhead: number): Promise<{ id: string }[]> {
+  return (await tx`
+    SELECT id FROM clip_sources
+     WHERE warned_at IS NULL AND clips_count > 0 AND expires_at IS NOT NULL
+       AND expires_at <= now() + (${daysAhead} * interval '1 day')
+       AND expires_at > now()
+  `) as unknown as { id: string }[]
+}
+
+export async function markClipSourceWarned(tx: Tx, id: string): Promise<void> {
+  await tx`UPDATE clip_sources SET warned_at = now() WHERE id = ${id}`
+}
+
 /** clip_props (janela/legenda/card) da revisão atual do clipe. */
 export async function getClipProps(tx: Tx, itemId: string): Promise<Record<string, unknown> | null> {
   const rows = (await tx`

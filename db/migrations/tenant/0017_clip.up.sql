@@ -34,7 +34,8 @@ CREATE TABLE clip_sources (
     created_at        timestamptz NOT NULL DEFAULT now(),
     updated_at        timestamptz NOT NULL DEFAULT now(),
     raw_expires_at    timestamptz,                      -- remoção do bruto (7d após processar)
-    expires_at        timestamptz                       -- remoção da fonte/JSON (60d)
+    expires_at        timestamptz,                      -- remoção da fonte/JSON (60d)
+    warned_at         timestamptz                       -- aviso de expiração já enviado (idempotência)
 );
 CREATE INDEX idx_clip_sources_status ON clip_sources (status, created_at);
 CREATE UNIQUE INDEX idx_clip_sources_hash ON clip_sources (content_hash) WHERE content_hash IS NOT NULL;

@@ -51,6 +51,25 @@ export async function emitContentPublishFailed(tx: Tx, args: PublishFailedArgs):
   `
 }
 
+/** Append de ClipsExpiring no outbox: os clipes de uma fonte serão removidos em
+ *  poucos dias (retenção 60d). O core notifica o dono para baixar/publicar antes. */
+export async function emitClipsExpiring(
+  tx: Tx,
+  args: { tenantId: string; sourceId: string; clips: number; expiresAt: string },
+): Promise<void> {
+  const payload = {
+    tenant_id: args.tenantId,
+    produto: PRODUTO,
+    source_id: args.sourceId,
+    clips: args.clips,
+    expires_at: args.expiresAt,
+  }
+  await tx`
+    INSERT INTO public.event_outbox (type, tenant_id, produto, payload)
+    VALUES ('ClipsExpiring', ${args.tenantId}::uuid, ${PRODUTO}, ${tx.json(payload)})
+  `
+}
+
 export type OutboxEvent = {
   id: number
   type: string
