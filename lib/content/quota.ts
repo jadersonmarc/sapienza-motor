@@ -1,5 +1,5 @@
 import type { Sql } from "@/lib/db"
-import { PRODUTO, tierOf, tenantAccess } from "@/lib/platform/gating"
+import { PRODUTO, tierOf, tenantAccess, clipperHours } from "@/lib/platform/gating"
 import { emitUsageRecorded } from "@/lib/platform/events"
 import { currentPeriod } from "@/lib/platform/period"
 
@@ -17,9 +17,15 @@ import { currentPeriod } from "@/lib/platform/period"
 
 export const METRIC_GERACAO = "geracao"
 export const METRIC_PECA = "peca"
+// Minutos de vídeo-fonte processados pelo Clipper. LIMITE OPERACIONAL, não fatura
+// (SPEC §5.2): vai a usage_counters pela mesma via (outbox→trigger) para instrumentar
+// e ser verificado na aceitação do job, mas o fechamento do core ignora (junta só
+// plans.metric='peca'). O teto vem de product_rules.clipper_hours (horas × 60).
+export const METRIC_CLIPPER_MINUTOS = "clipper_minutos"
 
 export class GenerationQuotaError extends Error {}
 export class PublishCapError extends Error {}
+export class ClipperHoursError extends Error {}
 
 // currentPeriod (BRT) vem de @/lib/platform/period — reexportado por compat com
 // quem já importava daqui.
@@ -105,6 +111,70 @@ export async function refundGeneration(sql: Sql, tenantId: string): Promise<void
       tenantId,
       metric: METRIC_GERACAO,
       count: -1,
+      period: currentPeriod(),
+    })
+  })
+}
+
+// ── Cota operacional de horas do Clipper (SPEC §5.2) ──────────────────────────
+// NÃO é métrica de fatura: é um teto para proteger a FILA. Verificado na aceitação
+// do job (após o probe dar a duração), com hard cap sempre — nunca processa para
+// cobrar depois. Sem venda de excedente na Onda 1. Emite minutos ao outbox só para
+// instrumentação (calibra o número). Refund em falha de ingestão (§7).
+
+/** Uso e teto de minutos de vídeo no período corrente (para UI e cheque). */
+export async function clipHoursQuota(
+  sql: Sql,
+  tenantId: string,
+): Promise<{ usedMinutes: number; limitMinutes: number; remainingMinutes: number }> {
+  const [used, hours] = await Promise.all([
+    usageOf(sql, tenantId, METRIC_CLIPPER_MINUTOS),
+    clipperHours(sql, tenantId),
+  ])
+  const limitMinutes = Math.round(hours * 60)
+  return { usedMinutes: used, limitMinutes, remainingMinutes: Math.max(0, limitMinutes - used) }
+}
+
+/**
+ * Debita `minutes` da cota de horas do Clipper ao ACEITAR o job (após o probe).
+ * Lança ClipperHoursError se estourar o teto — a ingestão é bloqueada, nunca
+ * processada para cobrar depois. Advisory lock serializa o mesmo tenant. Se a
+ * ingestão falhar depois, chame refundClipHours(minutes).
+ */
+export async function reserveClipHours(sql: Sql, tenantId: string, minutes: number): Promise<void> {
+  const limitMinutes = Math.round((await clipperHours(sql, tenantId)) * 60)
+  await sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`clipper:${tenantId}`}))`
+    const rows = (await tx`
+      SELECT count FROM public.usage_counters
+       WHERE tenant_id = ${tenantId}::uuid AND produto = ${PRODUTO}
+         AND period = ${currentPeriod()} AND metric = ${METRIC_CLIPPER_MINUTOS}
+    `) as unknown as { count: number }[]
+    const used = rows[0]?.count ?? 0
+    if (used + minutes > limitMinutes) {
+      const restanteH = Math.max(0, (limitMinutes - used) / 60)
+      throw new ClipperHoursError(
+        `cota de horas de vídeo do plano atingida (${(used / 60).toFixed(1)}h/${(limitMinutes / 60).toFixed(1)}h neste mês; ` +
+          `restam ${restanteH.toFixed(1)}h). Faça upgrade para processar mais vídeo.`,
+      )
+    }
+    await emitUsageRecorded(tx, {
+      tenantId,
+      metric: METRIC_CLIPPER_MINUTOS,
+      count: minutes,
+      period: currentPeriod(),
+    })
+  })
+}
+
+/** Estorna minutos reservados de uma ingestão que não se concretizou (§7). */
+export async function refundClipHours(sql: Sql, tenantId: string, minutes: number): Promise<void> {
+  if (minutes <= 0) return
+  await sql.begin(async (tx) => {
+    await emitUsageRecorded(tx, {
+      tenantId,
+      metric: METRIC_CLIPPER_MINUTOS,
+      count: -minutes,
       period: currentPeriod(),
     })
   })

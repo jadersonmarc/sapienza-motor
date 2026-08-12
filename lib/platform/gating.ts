@@ -110,3 +110,35 @@ export async function motionWeight(sql: Sql): Promise<number> {
   const w = rules.motion_weight
   return typeof w === "number" && w > 0 ? w : 1
 }
+
+// Capability do CLIPPER (Clipes Inteligentes) por tier — espelha motion_enabled.
+// Vem de product_rules.rules.clipper_enabled = { start, pro, scale } (1 = libera).
+// Fallback conservador (false) — nunca chutar liberado.
+export async function clipperEnabled(sql: Sql, tenantId: string): Promise<boolean> {
+  const tier = await tierOf(sql, tenantId)
+  if (!tier) return false
+  const rules = await productRules(sql)
+  const map = rules.clipper_enabled
+  if (map && typeof map === "object") {
+    const v = (map as Record<string, unknown>)[tier]
+    if (typeof v === "number") return v === 1
+    if (typeof v === "boolean") return v
+  }
+  return false
+}
+
+// LIMITE OPERACIONAL de horas de vídeo-fonte por ciclo (SPEC §5.2) — NÃO é métrica
+// de fatura, é teto para proteger a fila. Vem de product_rules.rules.clipper_hours =
+// { start, pro, scale } (horas). Fallback 0 = bloqueia (não chutar liberado). 0 no
+// plano também bloqueia — coerente com "clipper indisponível".
+export async function clipperHours(sql: Sql, tenantId: string): Promise<number> {
+  const tier = await tierOf(sql, tenantId)
+  if (!tier) return 0
+  const rules = await productRules(sql)
+  const map = rules.clipper_hours
+  if (map && typeof map === "object") {
+    const v = (map as Record<string, unknown>)[tier]
+    if (typeof v === "number" && v >= 0) return v
+  }
+  return 0
+}

@@ -14,6 +14,10 @@ import {
   generationQuota,
   GenerationQuotaError,
   PublishCapError,
+  reserveClipHours,
+  refundClipHours,
+  clipHoursQuota,
+  ClipperHoursError,
 } from "@/lib/content/quota"
 import { MockChannel } from "@/lib/channels/mock"
 import { processOutbox } from "@/lib/provisioning"
@@ -134,6 +138,40 @@ maybe("motor data plane", () => {
       SELECT metric FROM public.usage_counters WHERE tenant_id = ${t}::uuid ORDER BY metric
     `) as unknown as { metric: string }[]
     expect(rows.map((r) => r.metric)).toEqual(["geracao"])
+  })
+
+  // Cota de HORAS do Clipper (SPEC §5.2): limite operacional, verificado na aceitação
+  // do job; nunca processa para cobrar depois; sem venda de excedente.
+  it("cota de horas: start (2h) aceita 90min, mas o 2º job (total 180>120) é bloqueado", async () => {
+    const t = await provisionTenant(sql, "start") // clipper_hours start = 2h = 120min
+    await reserveClipHours(sql, t, 90)
+    expect(await usage(sql, t, "clipper_minutos")).toBe(90)
+    await expect(reserveClipHours(sql, t, 90)).rejects.toThrow(ClipperHoursError)
+    expect(await usage(sql, t, "clipper_minutos")).toBe(90) // o bloqueado não debitou
+  })
+
+  it("cota de horas: teto acompanha o tier e clipHoursQuota reporta o restante (pro = 8h)", async () => {
+    const t = await provisionTenant(sql, "pro") // 8h = 480min
+    expect(await clipHoursQuota(sql, t)).toEqual({ usedMinutes: 0, limitMinutes: 480, remainingMinutes: 480 })
+    await reserveClipHours(sql, t, 50)
+    expect(await clipHoursQuota(sql, t)).toEqual({ usedMinutes: 50, limitMinutes: 480, remainingMinutes: 430 })
+  })
+
+  it("cota de horas: falha de ingestão estorna os minutos", async () => {
+    const t = await provisionTenant(sql, "pro")
+    await reserveClipHours(sql, t, 30)
+    expect(await usage(sql, t, "clipper_minutos")).toBe(30)
+    await refundClipHours(sql, t, 30)
+    expect(await usage(sql, t, "clipper_minutos")).toBe(0)
+  })
+
+  // Instrumentação, não fatura: os minutos aparecem em usage_counters mas o metric
+  // do plano é 'peca' (o fechamento ignora clipper_minutos).
+  it("cota de horas: contada em usage_counters, fora da fatura", async () => {
+    const t = await provisionTenant(sql, "pro")
+    await reserveClipHours(sql, t, 10)
+    expect(await usage(sql, t, "clipper_minutos")).toBe(10)
+    expect(await usage(sql, t, "peca")).toBe(0)
   })
 
   it("hard_cap: bloqueia publicação ao atingir o incluso, antes de postar no canal", async () => {
