@@ -31,6 +31,10 @@ export type ContentItem = {
   video_urls: Record<string, string> | null
   render_status: string | null
   render_error: string | null
+  // Clipe (corte de vídeo longo). is_clip marca a peça; reusa render_*/video_url.
+  is_clip?: boolean
+  clip_source_id?: string | null
+  clip_aspect?: string | null
   /** versão do editor_config vigente na criação (proveniência p/ métricas). */
   config_version: number | null
   /** título da revisão atual (presente em listItems; ausente em getItem). */
@@ -141,6 +145,177 @@ export async function getMotionProps(tx: Tx, itemId: string): Promise<MotionProp
      WHERE ci.id = ${itemId}
   `) as unknown as { motion_props: MotionProps | null }[]
   return rows[0]?.motion_props ?? null
+}
+
+// ── Clipes Inteligentes ───────────────────────────────────────────────────────
+// Uma fonte (clip_sources) percorre a esteira; cada clipe é um content_item is_clip
+// que reusa render_status/video_url. O claim atômico (FOR UPDATE SKIP LOCKED) deixa
+// o worker escalar em réplicas sem processar a mesma fonte/clipe em duplicidade.
+
+export type ClipSource = {
+  id: string
+  kind: string
+  origin: string
+  content_hash: string | null
+  r2_key_raw: string | null
+  duration_seconds: number | null
+  size_bytes: number | null
+  status: string
+  error: string | null
+  transcript_id: string | null
+  minutes_charged: number
+  clips_count: number
+  author_id: string | null
+  created_at: string
+  raw_expires_at: string | null
+  expires_at: string | null
+}
+
+/** Cria a fonte de vídeo (job da esteira), nascendo em 'queued'. Idempotência por
+ *  content_hash: se a mesma fonte já existe (dentro da retenção), devolve a existente
+ *  em vez de reprocessar/recobrar. */
+export async function createClipSource(
+  tx: Tx,
+  input: { kind: "upload" | "url"; origin: string; contentHash?: string | null; authorId?: string | null },
+): Promise<ClipSource> {
+  if (input.contentHash) {
+    const existing = (await tx`
+      SELECT * FROM clip_sources WHERE content_hash = ${input.contentHash}
+    `) as unknown as ClipSource[]
+    if (existing[0]) return existing[0]
+  }
+  const [row] = (await tx`
+    INSERT INTO clip_sources (kind, origin, content_hash, author_id)
+    VALUES (${input.kind}, ${input.origin}, ${input.contentHash ?? null}, ${input.authorId ?? null})
+    RETURNING *
+  `) as unknown as ClipSource[]
+  return row
+}
+
+export async function getClipSource(tx: Tx, id: string): Promise<ClipSource | null> {
+  const rows = (await tx`SELECT * FROM clip_sources WHERE id = ${id}`) as unknown as ClipSource[]
+  return rows[0] ?? null
+}
+
+/** Reivindica atomicamente a próxima fonte num dos estágios `from`, movendo-a para
+ *  `to` e marcando o lease (claimed_at). Devolve null se não houver nenhuma livre.
+ *  FOR UPDATE SKIP LOCKED = duas réplicas nunca pegam a mesma fonte. */
+export async function claimClipSource(
+  tx: Tx,
+  from: string[],
+  to: string,
+): Promise<ClipSource | null> {
+  const rows = (await tx`
+    UPDATE clip_sources SET status = ${to}, claimed_at = now(), updated_at = now()
+     WHERE id = (
+       SELECT id FROM clip_sources
+        WHERE status = ANY(${from})
+        ORDER BY created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+     )
+    RETURNING *
+  `) as unknown as ClipSource[]
+  return rows[0] ?? null
+}
+
+/** Avança o estágio de uma fonte (sem claim — dentro do processamento já reivindicado). */
+export async function setClipSourceStatus(tx: Tx, id: string, status: string): Promise<void> {
+  await tx`UPDATE clip_sources SET status = ${status}, updated_at = now() WHERE id = ${id}`
+}
+
+/** Marca a fonte com erro (a esteira retoma/estorna a partir daqui). */
+export async function setClipSourceError(tx: Tx, id: string, error: string): Promise<void> {
+  await tx`UPDATE clip_sources SET status = 'error', error = ${error}, updated_at = now() WHERE id = ${id}`
+}
+
+/** Grava os metadados do probe + horas debitadas + janelas de expiração (bruto/JSON). */
+export async function setClipSourceProbe(
+  tx: Tx,
+  id: string,
+  probe: {
+    durationSeconds: number
+    sizeBytes: number
+    minutesCharged: number
+    rawKey: string
+    rawExpiresAt: string
+    expiresAt: string
+  },
+): Promise<void> {
+  await tx`
+    UPDATE clip_sources
+       SET duration_seconds = ${probe.durationSeconds},
+           size_bytes = ${probe.sizeBytes},
+           minutes_charged = ${probe.minutesCharged},
+           r2_key_raw = ${probe.rawKey},
+           raw_expires_at = ${probe.rawExpiresAt},
+           expires_at = ${probe.expiresAt},
+           updated_at = now()
+     WHERE id = ${id}
+  `
+}
+
+export async function setClipSourceClips(tx: Tx, id: string, count: number): Promise<void> {
+  await tx`UPDATE clip_sources SET clips_count = ${count}, updated_at = now() WHERE id = ${id}`
+}
+
+/** Persiste a transcrição (texto + palavras com tempo) e a liga à fonte. */
+export async function saveTranscript(
+  tx: Tx,
+  input: { sourceId: string; lang: string | null; text: string; words: unknown[]; expiresAt: string },
+): Promise<string> {
+  const [row] = (await tx`
+    INSERT INTO clip_transcripts (source_id, lang, text, words, expires_at)
+    VALUES (${input.sourceId}, ${input.lang}, ${input.text}, ${tx.json(input.words as Json)}, ${input.expiresAt})
+    RETURNING id
+  `) as unknown as { id: string }[]
+  await tx`UPDATE clip_sources SET transcript_id = ${row.id}, updated_at = now() WHERE id = ${input.sourceId}`
+  return row.id
+}
+
+export type Transcript = { id: string; text: string; words: unknown[]; lang: string | null }
+
+export async function getTranscript(tx: Tx, sourceId: string): Promise<Transcript | null> {
+  const rows = (await tx`
+    SELECT id, text, words, lang FROM clip_transcripts WHERE source_id = ${sourceId} ORDER BY created_at DESC LIMIT 1
+  `) as unknown as Transcript[]
+  return rows[0] ?? null
+}
+
+/** Cria o clipe como content_item (is_clip), nascendo em render_status='preparing'
+ *  — igual ao motion, para o render NÃO pegá-lo antes das clip_props gravadas. */
+export async function createClipItem(
+  tx: Tx,
+  input: { slug: string; aspect: string; sourceId: string; format?: string; authorId?: string | null },
+): Promise<{ id: string }> {
+  const [item] = (await tx`
+    INSERT INTO content_items (slug, format, author_id, is_clip, clip_source_id, clip_aspect, generating, render_status, config_version)
+    VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, ${input.sourceId}, ${input.aspect}, true, 'preparing',
+            (SELECT config_version FROM editor_config WHERE id = true))
+    RETURNING id
+  `) as unknown as { id: string }[]
+  return item
+}
+
+/** Clipes com render pendente (varredura do clip-worker — is_clip, não colide com motion). */
+export async function listQueuedClips(tx: Tx): Promise<{ id: string; slug: string; clip_aspect: string | null }[]> {
+  return (await tx`
+    SELECT id, slug, clip_aspect
+      FROM content_items
+     WHERE is_clip = true AND render_status = 'queued'
+     ORDER BY created_at ASC
+  `) as unknown as { id: string; slug: string; clip_aspect: string | null }[]
+}
+
+/** clip_props (janela/legenda/card) da revisão atual do clipe. */
+export async function getClipProps(tx: Tx, itemId: string): Promise<Record<string, unknown> | null> {
+  const rows = (await tx`
+    SELECT cr.clip_props
+      FROM content_items ci
+      JOIN content_revisions cr ON cr.id = ci.current_revision_id
+     WHERE ci.id = ${itemId}
+  `) as unknown as { clip_props: Record<string, unknown> | null }[]
+  return rows[0]?.clip_props ?? null
 }
 
 /** Registra (ou limpa, com null) o erro da última tentativa de publicação em
@@ -295,11 +470,13 @@ export async function addRevision(
     seo?: Record<string, unknown>
     /** Campos do preset de motion (words/quote/slides/stat+source) — coluna dedicada. */
     motionProps?: Record<string, unknown>
+    /** Props do clipe (janela de corte, legenda, card de abertura) — coluna dedicada. */
+    clipProps?: Record<string, unknown>
   },
 ): Promise<string> {
   const [rev] = (await tx`
-    INSERT INTO content_revisions (content_item_id, title, body_markdown, excerpt, seo, motion_props, ai_generated, author_id)
-    VALUES (${itemId}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, ${tx.json((input.seo ?? {}) as Json)}, ${input.motionProps ? tx.json(input.motionProps as Json) : null}, ${input.ai}, ${input.authorId ?? null})
+    INSERT INTO content_revisions (content_item_id, title, body_markdown, excerpt, seo, motion_props, clip_props, ai_generated, author_id)
+    VALUES (${itemId}, ${input.title}, ${input.bodyMarkdown}, ${input.excerpt ?? null}, ${tx.json((input.seo ?? {}) as Json)}, ${input.motionProps ? tx.json(input.motionProps as Json) : null}, ${input.clipProps ? tx.json(input.clipProps as Json) : null}, ${input.ai}, ${input.authorId ?? null})
     RETURNING id
   `) as unknown as { id: string }[]
   await tx`
