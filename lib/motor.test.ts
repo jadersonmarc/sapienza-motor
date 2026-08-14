@@ -3,7 +3,21 @@ import { randomUUID } from "node:crypto"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
 import { withTenant, schemaName, applyTenantMigrations } from "@/lib/platform/tenancy"
 import { tenantMigrations } from "@/lib/db/migrations"
-import { createItem, upsertSocialDraft, insertAnalysis, listAnalyses, listItemTitles, deleteItem, getItem } from "@/lib/content/store"
+import {
+  createItem,
+  upsertSocialDraft,
+  insertAnalysis,
+  listAnalyses,
+  listItemTitles,
+  deleteItem,
+  getItem,
+  createClipSource,
+  createClipItem,
+  addRevision,
+  setRenderStatus,
+  claimNextClip,
+  countRenderingClips,
+} from "@/lib/content/store"
 import { getEditorConfig, upsertEditorConfig } from "@/lib/content/editor-config"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
@@ -172,6 +186,30 @@ maybe("motor data plane", () => {
     await reserveClipHours(sql, t, 10)
     expect(await usage(sql, t, "clipper_minutos")).toBe(10)
     expect(await usage(sql, t, "peca")).toBe(0)
+  })
+
+  // Escala horizontal do render (Onda 2): o claim atômico garante que réplicas nunca
+  // peguem o mesmo clipe; countRenderingClips alimenta o teto por tenant.
+  it("clip render: claim atômico entrega cada clipe uma vez; conta os em render", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const ids = await withTenant(sql, t, async (tx) => {
+      const src = await createClipSource(tx, { kind: "url", origin: "u" })
+      const out: string[] = []
+      for (const slug of ["c1", "c2"]) {
+        const item = await createClipItem(tx, { slug, aspect: "9x16", sourceId: src.id })
+        await addRevision(tx, item.id, { title: slug, bodyMarkdown: "x", ai: false, clipProps: {} })
+        await setRenderStatus(tx, item.id, "queued")
+        out.push(item.id)
+      }
+      return out
+    })
+    const c1 = await withTenant(sql, t, (tx) => claimNextClip(tx))
+    const c2 = await withTenant(sql, t, (tx) => claimNextClip(tx))
+    const c3 = await withTenant(sql, t, (tx) => claimNextClip(tx))
+    expect(c1?.id && c2?.id && c1.id !== c2.id).toBeTruthy()
+    expect(new Set([c1?.id, c2?.id])).toEqual(new Set(ids))
+    expect(c3).toBeNull() // fila vazia
+    expect(await withTenant(sql, t, (tx) => countRenderingClips(tx))).toBe(2)
   })
 
   it("hard_cap: bloqueia publicação ao atingir o incluso, antes de postar no canal", async () => {

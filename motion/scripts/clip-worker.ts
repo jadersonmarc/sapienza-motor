@@ -10,7 +10,8 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { activeTenants } from "@/lib/platform/gating"
 import {
   claimClipSource,
-  listQueuedClips,
+  claimNextClip,
+  countRenderingClips,
   getClipProps,
   requeueStaleClipSources,
   setItemVideo,
@@ -35,6 +36,9 @@ const PORT = Number(process.env.PORT ?? 3300)
 const CONCURRENCY = Math.max(1, Number(process.env.CLIP_RENDER_CONCURRENCY ?? 2))
 const RENDER_TIMEOUT_MS = Math.max(30_000, Number(process.env.CLIP_RENDER_TIMEOUT_MS ?? 600_000))
 const STALE_SECONDS = Math.max(300, Number(process.env.CLIP_STALE_SECONDS ?? 1800))
+// Teto de clipes renderizando ao mesmo tempo por tenant (fila por tenant, §7) — um
+// cliente não monopoliza a capacidade. Coordenado via DB, vale entre réplicas.
+const TENANT_MAX_INFLIGHT = Math.max(1, Number(process.env.CLIP_TENANT_MAX_INFLIGHT ?? 3))
 const LICENSE_KEY = process.env.REMOTION_LICENSE_KEY ?? "free-license"
 const BRAND_HANDLE = process.env.MOTION_BRAND_HANDLE ?? "@sapienzalabs"
 
@@ -90,7 +94,7 @@ async function processSources(sql: ReturnType<typeof getDb>, tenantId: string): 
 type QueuedClip = { id: string; slug: string; clip_aspect: string | null }
 
 async function renderClip(sql: ReturnType<typeof getDb>, tenantId: string, item: QueuedClip): Promise<void> {
-  await withTenant(sql, tenantId, (tx) => setRenderStatus(tx, item.id, "rendering"))
+  // O clipe já foi reivindicado (render_status='rendering') pelo claim atômico.
   try {
     if (!isStorageConfigured()) throw new Error("storage R2 não configurado (S3_* / MOTOR_PUBLIC_URL)")
     const { props, handle, logoUrl } = await withTenant(sql, tenantId, async (tx) => {
@@ -141,16 +145,20 @@ async function renderClip(sql: ReturnType<typeof getDb>, tenantId: string, item:
 }
 
 async function renderQueuedClips(sql: ReturnType<typeof getDb>, tenantId: string): Promise<number> {
-  const queued = (await withTenant(sql, tenantId, (tx) => listQueuedClips(tx))) as QueuedClip[]
-  let i = 0
   let done = 0
   async function worker() {
-    while (i < queued.length) {
-      await renderClip(sql, tenantId, queued[i++])
+    for (;;) {
+      // Teto por tenant: não passa de N clipes renderizando ao mesmo tempo (§7).
+      const inflight = await withTenant(sql, tenantId, (tx) => countRenderingClips(tx))
+      if (inflight >= TENANT_MAX_INFLIGHT) break
+      // Claim atômico (queued→rendering): duas réplicas nunca pegam o mesmo clipe.
+      const clip = await withTenant(sql, tenantId, (tx) => claimNextClip(tx))
+      if (!clip) break
+      await renderClip(sql, tenantId, clip as QueuedClip)
       done++
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queued.length) }, worker))
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker))
   return done
 }
 

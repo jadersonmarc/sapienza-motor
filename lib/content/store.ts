@@ -362,6 +362,31 @@ export async function listQueuedClips(tx: Tx): Promise<{ id: string; slug: strin
   `) as unknown as { id: string; slug: string; clip_aspect: string | null }[]
 }
 
+/** Reivindica atomicamente o próximo clipe a renderizar (queued→rendering), para o
+ *  render escalar em réplicas sem processar o mesmo clipe duas vezes (Onda 2). */
+export async function claimNextClip(tx: Tx): Promise<{ id: string; slug: string; clip_aspect: string | null } | null> {
+  const rows = (await tx`
+    UPDATE content_items SET render_status = 'rendering', updated_at = now()
+     WHERE id = (
+       SELECT id FROM content_items
+        WHERE is_clip = true AND render_status = 'queued'
+        ORDER BY created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+     )
+    RETURNING id, slug, clip_aspect
+  `) as unknown as { id: string; slug: string; clip_aspect: string | null }[]
+  return rows[0] ?? null
+}
+
+/** Nº de clipes do tenant renderizando agora (teto de jobs simultâneos por tenant). */
+export async function countRenderingClips(tx: Tx): Promise<number> {
+  const rows = (await tx`
+    SELECT count(*)::int AS n FROM content_items WHERE is_clip = true AND render_status = 'rendering'
+  `) as unknown as { n: number }[]
+  return rows[0]?.n ?? 0
+}
+
 // ── Retenção / expiração (SPEC §3.8) ──────────────────────────────────────────
 
 /** Fontes cujo vídeo-fonte BRUTO já venceu (7d) e ainda têm bruto no R2. */
