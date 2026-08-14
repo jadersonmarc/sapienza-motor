@@ -41,6 +41,27 @@ export function minutesFor(durationSec: number): number {
   return Math.max(1, Math.ceil(durationSec / 60))
 }
 
+/** Normaliza links de compartilhamento de nuvem para download direto (Onda 2, sem
+ *  OAuth): Google Drive e Dropbox. Demais URLs (YouTube/Vimeo/etc.) seguem intactas
+ *  para o yt-dlp. Não valida — só reescreve o formato conhecido. */
+export function normalizeSourceUrl(url: string): string {
+  const u = url.trim()
+  // Google Drive: .../file/d/<id>/... ou ...open?id=<id> → uc?export=download&id=<id>
+  const drive = u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?[^#]*id=)([a-zA-Z0-9_-]+)/)
+  if (drive) return `https://drive.google.com/uc?export=download&id=${drive[1]}`
+  // Dropbox: força o download direto (dl=1).
+  if (/dropbox\.com\//i.test(u)) {
+    try {
+      const parsed = new URL(u)
+      parsed.searchParams.set("dl", "1")
+      return parsed.toString()
+    } catch {
+      return u
+    }
+  }
+  return u
+}
+
 /** Janelas de expiração a partir de agora (bruto 7d; transcrição/clipes 60d). */
 export function retentionDates(now = new Date()): { rawExpiresAt: string; expiresAt: string } {
   const raw = new Date(now.getTime() + RAW_RETENTION_DAYS * 86400_000)

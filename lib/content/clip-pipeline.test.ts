@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { minutesFor, retentionDates, buildClipProps, RAW_RETENTION_DAYS, ASSET_RETENTION_DAYS } from "./clip-pipeline"
+import {
+  minutesFor,
+  retentionDates,
+  buildClipProps,
+  normalizeSourceUrl,
+  RAW_RETENTION_DAYS,
+  ASSET_RETENTION_DAYS,
+} from "./clip-pipeline"
 import type { ClipSuggestion, TranscriptWord } from "./clip-types"
 
 describe("minutesFor", () => {
@@ -10,6 +17,24 @@ describe("minutesFor", () => {
     expect(minutesFor(61)).toBe(2)
     expect(minutesFor(3000)).toBe(50) // 50min exatos
     expect(minutesFor(3001)).toBe(51)
+  })
+})
+
+describe("normalizeSourceUrl", () => {
+  it("Google Drive share → download direto", () => {
+    expect(normalizeSourceUrl("https://drive.google.com/file/d/ABC123_-x/view?usp=sharing")).toBe(
+      "https://drive.google.com/uc?export=download&id=ABC123_-x",
+    )
+    expect(normalizeSourceUrl("https://drive.google.com/open?id=XYZ789")).toBe(
+      "https://drive.google.com/uc?export=download&id=XYZ789",
+    )
+  })
+  it("Dropbox força dl=1", () => {
+    expect(normalizeSourceUrl("https://www.dropbox.com/s/abc/video.mp4?dl=0")).toContain("dl=1")
+  })
+  it("YouTube e outras URLs ficam intactas", () => {
+    const u = "https://youtu.be/abc123"
+    expect(normalizeSourceUrl(u)).toBe(u)
   })
 })
 

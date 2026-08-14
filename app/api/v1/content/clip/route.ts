@@ -4,6 +4,7 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate, clipperEnabled } from "@/lib/platform/gating"
 import { clipHoursQuota } from "@/lib/content/quota"
 import { createClipSource, listClipSources } from "@/lib/content/store"
+import { normalizeSourceUrl } from "@/lib/content/clip-pipeline"
 import { pokeClipWorker } from "./poke"
 
 export const runtime = "nodejs"
@@ -42,8 +43,10 @@ export async function POST(req: Request): Promise<Response> {
     return json(409, { error: "cota de horas de vídeo do plano esgotada neste mês; faça upgrade" })
   }
 
+  // Link de nuvem (Drive/Dropbox) vira download direto; demais URLs seguem intactas.
+  const origin = normalizeSourceUrl(url)
   const source = await withTenant(sql, a.tenantId, (tx) =>
-    createClipSource(tx, { kind: "url", origin: url, authorId: a.userId }),
+    createClipSource(tx, { kind: "url", origin, authorId: a.userId }),
   )
   await pokeClipWorker()
   return json(202, { id: source.id, status: source.status })
