@@ -387,6 +387,42 @@ export async function countRenderingClips(tx: Tx): Promise<number> {
   return rows[0]?.n ?? 0
 }
 
+// ── Conectores de nuvem (OAuth) ───────────────────────────────────────────────
+
+export type ClipConnectorRow = {
+  provider: string
+  credentials_enc: string | null
+  refresh_enc: string | null
+  expires_at: string | null
+}
+
+/** Grava/atualiza o token cifrado de um conector do tenant (upsert por provider). */
+export async function saveClipConnector(
+  tx: Tx,
+  input: { provider: string; credentialsEnc: string; refreshEnc: string | null; expiresAt: string | null },
+): Promise<void> {
+  await tx`
+    INSERT INTO clip_connectors (provider, credentials_enc, refresh_enc, expires_at)
+    VALUES (${input.provider}, ${input.credentialsEnc}, ${input.refreshEnc}, ${input.expiresAt})
+    ON CONFLICT (provider) DO UPDATE
+      SET credentials_enc = EXCLUDED.credentials_enc,
+          refresh_enc = EXCLUDED.refresh_enc,
+          expires_at = EXCLUDED.expires_at,
+          updated_at = now()
+  `
+}
+
+export async function getClipConnector(tx: Tx, provider: string): Promise<ClipConnectorRow | null> {
+  const rows = (await tx`SELECT provider, credentials_enc, refresh_enc, expires_at FROM clip_connectors WHERE provider = ${provider}`) as unknown as ClipConnectorRow[]
+  return rows[0] ?? null
+}
+
+/** Provedores conectados do tenant (para a UI mostrar o estado). */
+export async function listClipConnectors(tx: Tx): Promise<string[]> {
+  const rows = (await tx`SELECT provider FROM clip_connectors`) as unknown as { provider: string }[]
+  return rows.map((r) => r.provider)
+}
+
 // ── Retenção / expiração (SPEC §3.8) ──────────────────────────────────────────
 
 /** Fontes cujo vídeo-fonte BRUTO já venceu (7d) e ainda têm bruto no R2. */
