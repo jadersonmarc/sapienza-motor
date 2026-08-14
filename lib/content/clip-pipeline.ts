@@ -19,7 +19,7 @@ import {
 } from "@/lib/content/store"
 import { reserveClipHours, refundClipHours } from "@/lib/content/quota"
 import { sttFromEnv, type SttProvider } from "@/lib/platform/stt"
-import { analyzeClips, sliceWords } from "@/lib/ai/clip-analysis"
+import { analyzeClips, sliceWords, buildOverlays } from "@/lib/ai/clip-analysis"
 import type { ClipProps, ClipAspect, ClipSuggestion, TranscriptWord } from "@/lib/content/clip-types"
 import { uploadObject, getObject } from "@/lib/storage/s3"
 import { clipRawKey } from "@/lib/storage/keys"
@@ -56,14 +56,16 @@ export function buildClipProps(s: ClipSuggestion, transcriptWords: TranscriptWor
   const outMs = Math.round(s.end_time * 1000)
   const aspect: ClipAspect = s.suggested_aspect_ratio === "16:9" ? "16x9" : "9x16"
   const hook = s.hook_text.trim()
+  const words = sliceWords(transcriptWords, inMs, outMs)
   return {
     sourceKey,
     inMs,
     outMs,
     aspect,
     caption: { position: "bottom" },
-    words: sliceWords(transcriptWords, inMs, outMs),
+    words,
     openingCard: hook ? { words: hook.split(/\s+/).slice(0, 8), highlightIndex: 0 } : undefined,
+    overlays: buildOverlays(s, words),
     brandOn: true,
     score: s.score,
   }

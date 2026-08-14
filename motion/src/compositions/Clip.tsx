@@ -1,8 +1,10 @@
 import React from "react"
-import { AbsoluteFill, OffthreadVideo, Img, useCurrentFrame, useVideoConfig, interpolate } from "remotion"
+import { AbsoluteFill, OffthreadVideo, Img, Sequence, useCurrentFrame, useVideoConfig, interpolate } from "remotion"
 import { fieldStyle, fonts, colors } from "../../../lib/brand/tokens"
-import type { ClipAspect, ClipProps, TranscriptWord } from "../../../lib/content/clip-types"
+import type { ClipAspect, ClipOverlay, ClipProps, TranscriptWord } from "../../../lib/content/clip-types"
 import { HeadlineBody } from "./Headline"
+import { QuoteBody } from "./Quote"
+import { StatBody } from "./Stat"
 import { easeOut } from "../brand"
 
 // Composição do CLIPE: vídeo-fonte recortado + legenda karaokê + (opcional) card de
@@ -120,6 +122,58 @@ const OpeningCard: React.FC<{ card: NonNullable<ClipProps["openingCard"]>; aspec
   )
 }
 
+const FPS_OV = 30
+
+/** Overlays temporizados (Onda 2): citação/card de dado reusando as composições do
+ *  motion, sobre um scrim, no terço superior para não tapar a legenda de baixo. */
+const Overlays: React.FC<{ overlays: ClipOverlay[]; aspect: ClipAspect }> = ({ overlays, aspect }) => {
+  const { w } = CLIP_ASPECTS[aspect]
+  return (
+    <>
+      {overlays.map((ov, i) => {
+        const from = Math.max(0, Math.round((ov.startMs / 1000) * FPS_OV))
+        const dur = Math.max(1, Math.round(((ov.endMs - ov.startMs) / 1000) * FPS_OV))
+        return (
+          <Sequence key={i} from={from} durationInFrames={dur}>
+            <AbsoluteFill
+              style={{
+                justifyContent: "flex-start",
+                alignItems: "center",
+                paddingTop: Math.round(w * 0.14),
+                paddingLeft: Math.round(w * 0.08),
+                paddingRight: Math.round(w * 0.08),
+              }}
+            >
+              <div
+                style={{
+                  backgroundColor: "rgba(0,0,0,0.5)",
+                  borderRadius: Math.round(w * 0.03),
+                  padding: Math.round(w * 0.05),
+                }}
+              >
+                {ov.kind === "quote" ? (
+                  <QuoteBody aspect="9x16" field="ink" kind="quote" quote={ov.quote} keyphrase={ov.keyphrase ?? ""} author="" />
+                ) : (
+                  <StatBody
+                    aspect="9x16"
+                    field="ink"
+                    kind="stat"
+                    label={ov.label}
+                    value={ov.value}
+                    suffix={ov.suffix ?? ""}
+                    subtitle=""
+                    source={ov.source}
+                  />
+                )}
+              </div>
+            </AbsoluteFill>
+          </Sequence>
+        )
+      })}
+    </>
+  )
+}
+
 /** Rodapé de marca do tenant (logo + handle) — inline, sem tocar brand.tsx. */
 const BrandBadge: React.FC<{ handle?: string; logo?: string; aspect: ClipAspect }> = ({ handle, logo, aspect }) => {
   const { w, h } = CLIP_ASPECTS[aspect]
@@ -174,6 +228,7 @@ export const ClipComposition: React.FC<ClipCompProps> = ({ aspect, sourceUrl, br
         ) : null}
       </AbsoluteFill>
       {clip.words.length > 0 && <Karaoke words={clip.words} style={clip.caption} aspect={aspect} />}
+      {clip.overlays && clip.overlays.length > 0 && <Overlays overlays={clip.overlays} aspect={aspect} />}
       {clip.brandOn && <BrandBadge handle={brandHandle} logo={brandLogo} aspect={aspect} />}
       {clip.openingCard && <OpeningCard card={clip.openingCard} aspect={aspect} />}
     </AbsoluteFill>

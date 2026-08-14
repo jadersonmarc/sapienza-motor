@@ -1,5 +1,5 @@
 import { callStructured } from "./client"
-import type { ClipSuggestion, TranscriptWord } from "@/lib/content/clip-types"
+import type { ClipOverlay, ClipSuggestion, TranscriptWord } from "@/lib/content/clip-types"
 
 // Seleção de cortes (SPEC §9): o modelo lê a transcrição e devolve os melhores
 // momentos, ranqueados. A pontuação é ordenação RELATIVA dentro do vídeo, não
@@ -120,6 +120,50 @@ export function applyWordCorrection<T extends { text: string }>(
     return { ...w, text: lead + to + trail }
   })
   return { words: out, count }
+}
+
+/** Gera overlays (Onda 2) a partir do gancho e das palavras JÁ recortadas do clipe
+ *  (re-baseadas a 0). O guardrail é satisfeito POR CONSTRUÇÃO: a citação vem do
+ *  source_quote (literal da transcrição) e o `source` do card de dado é montado de
+ *  palavras reais do trecho. Determinístico (sem IA), portanto testável.
+ *  - Citação: se o source_quote é curto (≤12 palavras), aparece nos ~3s iniciais.
+ *  - Card de dado: o 1º número do trecho vira um stat, com contexto literal em `source`. */
+export function buildOverlays(suggestion: ClipSuggestion, clipWords: TranscriptWord[]): ClipOverlay[] {
+  const overlays: ClipOverlay[] = []
+
+  const quote = suggestion.source_quote.trim()
+  if (quote && quote.split(/\s+/).length <= 12) {
+    overlays.push({ kind: "quote", startMs: 300, endMs: 3300, quote })
+  }
+
+  // 1º token numérico do trecho → card de dado.
+  const numRe = /^[^\p{L}\p{N}]*(\d[\d.,]*)\s*(%|k|mil|x)?[^\p{L}\p{N}]*$/iu
+  for (let i = 0; i < clipWords.length; i++) {
+    const m = clipWords[i].text.match(numRe)
+    if (!m) continue
+    const value = parseFloat(m[1].replace(/\.(?=\d{3}\b)/g, "").replace(",", "."))
+    if (!isFinite(value)) continue
+    const suffix = m[2] ?? ""
+    const ctx = clipWords.slice(Math.max(0, i - 3), i + 1)
+    const label = ctx
+      .slice(0, -1)
+      .map((w) => w.text)
+      .join(" ")
+      .slice(0, 40)
+    const source = ctx.map((w) => w.text).join(" ")
+    overlays.push({
+      kind: "stat",
+      startMs: clipWords[i].startMs,
+      endMs: clipWords[i].startMs + 2500,
+      label: label || "Destaque",
+      value,
+      suffix,
+      source,
+    })
+    break // só o primeiro, para não poluir
+  }
+
+  return overlays
 }
 
 /** Recorta as palavras do trecho [startMs,outMs] e as re-baseia a 0 = início do

@@ -40,6 +40,14 @@ export type OpeningCard = {
   highlightIndex?: number
 }
 
+/** Overlay temporizado DENTRO do clipe (Onda 2) — hooks/B-roll reusando as
+ *  composições do motion. Tempos em ms, relativos ao início do clipe. O card de dado
+ *  carrega `source` (trecho literal da transcrição) só para auditoria do guardrail —
+ *  não é exibido. */
+export type ClipOverlay =
+  | { kind: "quote"; startMs: number; endMs: number; quote: string; keyphrase?: string }
+  | { kind: "stat"; startMs: number; endMs: number; label: string; value: number; suffix?: string; source: string }
+
 /** Props de um clipe renderizável. Tudo que a composição Remotion precisa. */
 export type ClipProps = {
   /** chave R2 do vídeo-fonte bruto (OffthreadVideo lê via proxy do motor). */
@@ -53,6 +61,8 @@ export type ClipProps = {
   /** palavras do trecho, re-baseadas a 0 = início do clipe. */
   words: TranscriptWord[]
   openingCard?: OpeningCard
+  /** overlays temporizados dentro do clipe (citação/card de dado) — Onda 2. */
+  overlays?: ClipOverlay[]
   /** aplica logo+handle do tenant (desligável por clipe). */
   brandOn: boolean
   /** score da análise (0–100, ordenação relativa) — para ranquear na grade. */

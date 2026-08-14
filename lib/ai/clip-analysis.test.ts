@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { sourceQuoteInTranscript, validateClips, sliceWords, applyWordCorrection } from "./clip-analysis"
+import { sourceQuoteInTranscript, validateClips, sliceWords, applyWordCorrection, buildOverlays } from "./clip-analysis"
 import type { ClipSuggestion, TranscriptWord } from "@/lib/content/clip-types"
 
 const TRANSCRIPT = "Você está errando na retenção. O segredo é abrir com uma promessa clara e entregar em trinta segundos."
@@ -73,6 +73,44 @@ describe("applyWordCorrection", () => {
   it("não muda nada quando não há match", () => {
     const { count } = applyWordCorrection(words, "xyz", "abc")
     expect(count).toBe(0)
+  })
+})
+
+describe("buildOverlays", () => {
+  const base: ClipSuggestion = {
+    clip_id: "c",
+    title: "T",
+    hook_text: "H",
+    source_quote: "abre com uma promessa clara",
+    start_time: 0,
+    end_time: 30,
+    score: 90,
+    rationale: "R",
+    suggested_aspect_ratio: "9:16",
+  }
+  it("gera overlay de citação quando o source_quote é curto", () => {
+    const ov = buildOverlays(base, [])
+    expect(ov.some((o) => o.kind === "quote")).toBe(true)
+  })
+  it("não gera citação quando o trecho é longo", () => {
+    const long = { ...base, source_quote: "uma ".repeat(20).trim() }
+    expect(buildOverlays(long, []).some((o) => o.kind === "quote")).toBe(false)
+  })
+  it("gera card de dado do 1º número, com source literal do trecho", () => {
+    const words = [
+      { text: "retenção", startMs: 0, endMs: 500 },
+      { text: "sobe", startMs: 500, endMs: 900 },
+      { text: "40%", startMs: 900, endMs: 1300 },
+      { text: "assim", startMs: 1300, endMs: 1700 },
+    ]
+    const ov = buildOverlays({ ...base, source_quote: "x ".repeat(20).trim() }, words)
+    const stat = ov.find((o) => o.kind === "stat")
+    expect(stat).toBeDefined()
+    if (stat && stat.kind === "stat") {
+      expect(stat.value).toBe(40)
+      expect(stat.suffix).toBe("%")
+      expect(stat.source).toContain("40%") // literal do trecho (guardrail por construção)
+    }
   })
 })
 
