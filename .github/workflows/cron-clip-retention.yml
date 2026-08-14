@@ -1,0 +1,18 @@
+name: Cron · retenção de clipes
+
+# Ciclo de expiração dos ativos do Clipper (SPEC §3.8): vídeo-fonte bruto em 7d,
+# transcrição/JSON e clipes renderizados em 60d, com aviso 3 dias antes. Idempotente
+# (roda diário). Seam: sem storage/tenants é no-op. 1×/dia.
+# Secrets: MOTOR_URL, WEBHOOK_SECRET.
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.MOTOR_URL }}/api/cron/clip-retention" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"
