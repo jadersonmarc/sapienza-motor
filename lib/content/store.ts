@@ -332,6 +332,11 @@ export async function getTranscript(tx: Tx, sourceId: string): Promise<Transcrip
   return rows[0] ?? null
 }
 
+/** Reescreve as palavras da transcrição (correção de termo propagada por vídeo). */
+export async function updateTranscriptWords(tx: Tx, sourceId: string, words: unknown[]): Promise<void> {
+  await tx`UPDATE clip_transcripts SET words = ${tx.json(words as Json)} WHERE source_id = ${sourceId}`
+}
+
 /** Cria o clipe como content_item (is_clip), nascendo em render_status='preparing'
  *  — igual ao motion, para o render NÃO pegá-lo antes das clip_props gravadas. */
 export async function createClipItem(

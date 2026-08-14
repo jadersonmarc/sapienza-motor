@@ -100,6 +100,28 @@ export function validateClips(
   return out.sort((a, b) => b.score - a.score)
 }
 
+/** Corrige um termo em todas as ocorrências (STT erra nome próprio/sigla/jargão).
+ *  Match do NÚCLEO alfanumérico, case-insensitive, preservando a pontuação ao redor
+ *  ("Sapiensa," → "Sapienza,"). Pura — devolve as palavras novas e quantas mudaram. */
+export function applyWordCorrection<T extends { text: string }>(
+  words: T[],
+  from: string,
+  to: string,
+): { words: T[]; count: number } {
+  const core = (s: string) => s.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+  const target = core(from)
+  if (!target) return { words, count: 0 }
+  let count = 0
+  const out = words.map((w) => {
+    if (core(w.text) !== target) return w
+    count++
+    const lead = w.text.match(/^[^\p{L}\p{N}]*/u)?.[0] ?? ""
+    const trail = w.text.match(/[^\p{L}\p{N}]*$/u)?.[0] ?? ""
+    return { ...w, text: lead + to + trail }
+  })
+  return { words: out, count }
+}
+
 /** Recorta as palavras do trecho [startMs,outMs] e as re-baseia a 0 = início do
  *  clipe (o karaokê da composição consome estes tempos, sem tocar o banco). */
 export function sliceWords(words: TranscriptWord[], startMs: number, endMs: number): TranscriptWord[] {

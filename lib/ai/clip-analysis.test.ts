@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { sourceQuoteInTranscript, validateClips, sliceWords } from "./clip-analysis"
+import { sourceQuoteInTranscript, validateClips, sliceWords, applyWordCorrection } from "./clip-analysis"
 import type { ClipSuggestion, TranscriptWord } from "@/lib/content/clip-types"
 
 const TRANSCRIPT = "Você está errando na retenção. O segredo é abrir com uma promessa clara e entregar em trinta segundos."
@@ -53,6 +53,26 @@ describe("validateClips", () => {
     expect(out.map((c) => c.clip_id)).toEqual(["b", "a"])
     expect(out[0].score).toBe(100) // clamp
     expect(out[1].suggested_aspect_ratio).toBe("16:9")
+  })
+})
+
+describe("applyWordCorrection", () => {
+  const words = [
+    { text: "A", startMs: 0, endMs: 1 },
+    { text: "sapiensa", startMs: 1, endMs: 2 },
+    { text: "é", startMs: 2, endMs: 3 },
+    { text: "Sapiensa,", startMs: 3, endMs: 4 },
+  ]
+  it("corrige todas as ocorrências, case-insensitive, preservando pontuação", () => {
+    const { words: out, count } = applyWordCorrection(words, "Sapiensa", "Sapienza")
+    expect(count).toBe(2)
+    expect(out[1].text).toBe("Sapienza")
+    expect(out[3].text).toBe("Sapienza,") // vírgula preservada
+    expect(out[0].text).toBe("A") // intactas
+  })
+  it("não muda nada quando não há match", () => {
+    const { count } = applyWordCorrection(words, "xyz", "abc")
+    expect(count).toBe(0)
   })
 })
 
