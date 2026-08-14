@@ -4,7 +4,17 @@ import { SignJWT } from "jose"
 import { testSql, setupControlPlane, provisionTenant, dropTenants, usage } from "@/lib/testutil"
 import { withTenant } from "@/lib/platform/tenancy"
 import { decryptSecret } from "@/lib/platform/crypto"
-import { createItem, insertProposedRevision } from "@/lib/content/store"
+import {
+  createItem,
+  insertProposedRevision,
+  createClipSource,
+  createClipItem,
+  addRevision,
+  saveTranscript,
+  setRenderStatus,
+  getClipProps,
+} from "@/lib/content/store"
+import type { ClipProps } from "@/lib/content/clip-types"
 import type { Sql } from "@/lib/db"
 
 // Testa a camada de API (route handlers) end-to-end: JWT do core → autorização →
@@ -500,6 +510,85 @@ maybe("motor API", () => {
     const { POST } = await import("@/app/api/v1/content/clip/route")
     const member = await token(t, { role: "member" })
     expect((await POST(req("POST", "/api/v1/content/clip", member, { url: "https://x/y" }))).status).toBe(403)
+  })
+
+  it("clip editor-lite: reajustar in/out re-recorta as palavras e re-enfileira o render", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t)
+    // Semeia fonte + transcrição + 1 clipe (em in_review) com clip_props.
+    const clipId = await withTenant(sql, t, async (tx) => {
+      const src = await createClipSource(tx, { kind: "url", origin: "https://v/1" })
+      await saveTranscript(tx, {
+        sourceId: src.id,
+        lang: "pt",
+        text: "a b c d",
+        words: [
+          { text: "a", startMs: 0, endMs: 1000 },
+          { text: "b", startMs: 1000, endMs: 2000 },
+          { text: "c", startMs: 2000, endMs: 3000 },
+          { text: "d", startMs: 3000, endMs: 4000 },
+        ],
+        expiresAt: new Date(Date.now() + 60 * 86400_000).toISOString(),
+      })
+      const item = await createClipItem(tx, { slug: "clip-a", aspect: "9x16", sourceId: src.id })
+      const props: ClipProps = {
+        sourceKey: "clips/raw/x.mp4",
+        inMs: 0,
+        outMs: 1000,
+        aspect: "9x16",
+        caption: { position: "bottom" },
+        words: [{ text: "a", startMs: 0, endMs: 1000 }],
+        brandOn: true,
+        score: 80,
+      }
+      await addRevision(tx, item.id, {
+        title: "Clipe A",
+        bodyMarkdown: "gancho",
+        ai: false,
+        clipProps: props as unknown as Record<string, unknown>,
+      })
+      await tx`UPDATE content_items SET status='in_review', render_status='done' WHERE id=${item.id}`
+      return item.id
+    })
+
+    const { PATCH } = await import("@/app/api/v1/content/clip/item/[id]/route")
+    const res = await PATCH(req("PATCH", `/api/v1/content/clip/item/${clipId}`, tok, { inMs: 1000, outMs: 3000, aspect: "16x9" }), {
+      params: Promise.resolve({ id: clipId }),
+    })
+    expect(res.status).toBe(200)
+
+    const after = await withTenant(sql, t, (tx) => getClipProps(tx, clipId))
+    const p = after as unknown as ClipProps
+    expect(p.inMs).toBe(1000)
+    expect(p.outMs).toBe(3000)
+    expect(p.aspect).toBe("16x9")
+    // b e c caem em [1000,3000], re-baseados a 0
+    expect(p.words).toEqual([
+      { text: "b", startMs: 0, endMs: 1000 },
+      { text: "c", startMs: 1000, endMs: 2000 },
+    ])
+    // voltou para a fila de render
+    const rs = (await withTenant(sql, t, (tx) => tx`SELECT render_status FROM content_items WHERE id=${clipId}`)) as unknown as {
+      render_status: string
+    }[]
+    expect(rs[0].render_status).toBe("queued")
+  })
+
+  it("clip editor-lite: clipe publicado não pode ser reajustado (409)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t)
+    const clipId = await withTenant(sql, t, async (tx) => {
+      const src = await createClipSource(tx, { kind: "url", origin: "https://v/2" })
+      const item = await createClipItem(tx, { slug: "clip-b", aspect: "9x16", sourceId: src.id })
+      await addRevision(tx, item.id, { title: "B", bodyMarkdown: "x", ai: false, clipProps: { inMs: 0, outMs: 1000 } })
+      await tx`UPDATE content_items SET status='published' WHERE id=${item.id}`
+      return item.id
+    })
+    const { PATCH } = await import("@/app/api/v1/content/clip/item/[id]/route")
+    const res = await PATCH(req("PATCH", `/api/v1/content/clip/item/${clipId}`, tok, { aspect: "16x9" }), {
+      params: Promise.resolve({ id: clipId }),
+    })
+    expect(res.status).toBe(409)
   })
 
   it("cron close-approval-window exige secret e promove in_review vencido", async () => {

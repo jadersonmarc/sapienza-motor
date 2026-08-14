@@ -213,13 +213,20 @@ export type ClipItemView = {
   clip_aspect: string | null
   video_url: string | null
   score: number | null
+  in_ms: number | null
+  out_ms: number | null
+  brand_on: boolean | null
 }
 
-/** Clipes gerados a partir de uma fonte (para o detalhe/grade do console). */
+/** Clipes gerados a partir de uma fonte (para o detalhe/grade do console). Traz os
+ *  campos do corte para pré-preencher o editor-lite. */
 export async function listClipsForSource(tx: Tx, sourceId: string): Promise<ClipItemView[]> {
   return (await tx`
     SELECT ci.id, ci.slug, cr.title, ci.status, ci.render_status, ci.clip_aspect, ci.video_url,
-           (cr.clip_props->>'score')::int AS score
+           (cr.clip_props->>'score')::int AS score,
+           (cr.clip_props->>'inMs')::int  AS in_ms,
+           (cr.clip_props->>'outMs')::int AS out_ms,
+           (cr.clip_props->>'brandOn')::boolean AS brand_on
       FROM content_items ci
       LEFT JOIN content_revisions cr ON cr.id = ci.current_revision_id
      WHERE ci.is_clip = true AND ci.clip_source_id = ${sourceId}
@@ -402,6 +409,33 @@ export async function getClipProps(tx: Tx, itemId: string): Promise<Record<strin
      WHERE ci.id = ${itemId}
   `) as unknown as { clip_props: Record<string, unknown> | null }[]
   return rows[0]?.clip_props ?? null
+}
+
+export type ClipEditContext = {
+  clip_source_id: string | null
+  status: string
+  clip_props: Record<string, unknown> | null
+}
+
+/** Contexto para editar um clipe: a fonte (p/ re-recortar as palavras), o estado
+ *  (só edita antes de publicar) e as props atuais. null se não é clipe. */
+export async function getClipEditContext(tx: Tx, itemId: string): Promise<ClipEditContext | null> {
+  const rows = (await tx`
+    SELECT ci.clip_source_id, ci.status, cr.clip_props
+      FROM content_items ci
+      LEFT JOIN content_revisions cr ON cr.id = ci.current_revision_id
+     WHERE ci.id = ${itemId} AND ci.is_clip = true
+  `) as unknown as ClipEditContext[]
+  return rows[0] ?? null
+}
+
+/** Atualiza as clip_props da revisão atual no lugar (o editor-lite reajusta o corte
+ *  e re-renderiza; não versiona como peça editorial). */
+export async function updateClipPropsInPlace(tx: Tx, itemId: string, props: Record<string, unknown>): Promise<void> {
+  await tx`
+    UPDATE content_revisions SET clip_props = ${tx.json(props as Json)}
+     WHERE id = (SELECT current_revision_id FROM content_items WHERE id = ${itemId})
+  `
 }
 
 /** Registra (ou limpa, com null) o erro da última tentativa de publicação em
