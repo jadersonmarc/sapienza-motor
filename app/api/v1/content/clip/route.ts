@@ -3,8 +3,9 @@ import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate, clipperEnabled } from "@/lib/platform/gating"
 import { clipHoursQuota } from "@/lib/content/quota"
-import { createClipSource, listClipSources } from "@/lib/content/store"
+import { createClipSource, listClipSources, listClipConnectors } from "@/lib/content/store"
 import { normalizeSourceUrl } from "@/lib/content/clip-pipeline"
+import { isConnectorConfigured } from "@/lib/content/clip-connectors"
 import { pokeClipWorker } from "./poke"
 
 export const runtime = "nodejs"
@@ -16,7 +17,10 @@ export async function GET(req: Request): Promise<Response> {
   const sql = getDb()
   const sources = await withTenant(sql, a.tenantId, (tx) => listClipSources(tx, 50))
   const quota = await clipHoursQuota(sql, a.tenantId)
-  return json(200, { sources, quota })
+  const connected = await withTenant(sql, a.tenantId, (tx) => listClipConnectors(tx))
+  // Provedores conectáveis (app OAuth configurado) — o console mostra os botões só quando dá.
+  const available = (["gdrive", "dropbox"] as const).filter((p) => isConnectorConfigured(p))
+  return json(200, { sources, quota, connectors: { connected, available } })
 }
 
 // POST /api/v1/content/clip — cria uma fonte por URL (YouTube/Vimeo/…). O worker
