@@ -124,7 +124,10 @@ async function renderClip(sql: ReturnType<typeof getDb>, tenantId: string, item:
         crf: 23,
         audioCodec: "aac" as const,
       }
+      // Instrumentação (base p/ calibrar o teto): segundos de render por clipe.
+      const renderStart = Date.now()
       await withTimeout(renderMedia(opts as Parameters<typeof renderMedia>[0]), RENDER_TIMEOUT_MS, `render clip ${item.id}`)
+      const renderMs = Date.now() - renderStart
       const buf = await readFile(output)
       const url = await uploadObject(tenantId, clipVideoKey({ slug: item.slug }), buf, "video/mp4")
       await withTenant(sql, tenantId, async (tx) => {
@@ -133,7 +136,11 @@ async function renderClip(sql: ReturnType<typeof getDb>, tenantId: string, item:
         await setRenderStatus(tx, item.id, "done")
       })
       await contentTransition(sql, tenantId, item.id, "in_review") // janela de 48h
-      console.log(`[clip-worker] clipe ${item.id} renderizado (${aspect})`)
+      const durSec = props.words.length ? (props.outMs - props.inMs) / 1000 : 0
+      console.log(
+        `[clip-worker][render] clipe=${item.id} aspecto=${aspect} clipe_s=${durSec.toFixed(1)} ` +
+          `render_ms=${renderMs} bytes=${buf.byteLength}`,
+      )
     } finally {
       await unlink(output).catch(() => {})
     }
