@@ -56,7 +56,7 @@ CREATE TRIGGER event_outbox_aggregate_usage AFTER INSERT ON public.event_outbox
 TRUNCATE public.subscriptions, public.plans, public.product_rules, public.usage_counters,
          public.event_outbox, bus.event_cursors;
 INSERT INTO public.product_rules (produto, rules)
-  VALUES ('motor', '{"janela_aprovacao_horas": 48, "max_regeneracoes_por_peca": 2, "motion_enabled": {"start": 0, "pro": 1, "scale": 1}, "motion_weight": 1, "clipper_enabled": {"start": 1, "pro": 1, "scale": 1}, "clipper_hours": {"start": 2, "pro": 8, "scale": 25}}');
+  VALUES ('motor', '{"janela_aprovacao_horas": 48, "max_regeneracoes_por_peca": 2, "motion_enabled": {"start": 0, "pro": 1, "scale": 1}, "motion_weight": 1, "clipper_enabled": {"start": 1, "pro": 1, "scale": 1}, "clipper_hours": {"start": 2, "pro": 8, "scale": 25}, "clipper_4k": {"start": 0, "pro": 0, "scale": 1}}');
 INSERT INTO public.plans (produto, tier, metric, mensal, incluso, canais, excedente_unitario)
   VALUES ('motor','start','peca',400,12,1,25),
          ('motor','pro','peca',700,30,2,25),

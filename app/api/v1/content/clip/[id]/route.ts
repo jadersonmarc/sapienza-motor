@@ -1,6 +1,7 @@
 import { authed, isResponse, json } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
+import { clip4kEnabled } from "@/lib/platform/gating"
 import { getClipSource, listClipsForSource } from "@/lib/content/store"
 
 export const runtime = "nodejs"
@@ -18,5 +19,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!source) return json(404, { error: "fonte não encontrada" })
   // Grade ordenada por score (melhores momentos primeiro).
   clips.sort((x, y) => (y.score ?? 0) - (x.score ?? 0))
-  return json(200, { source, clips })
+  const can4k = await clip4kEnabled(sql, a.tenantId)
+  return json(200, { source, clips, can4k })
 }

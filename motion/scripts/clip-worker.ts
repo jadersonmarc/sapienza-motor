@@ -7,7 +7,7 @@ import { bundle } from "@remotion/bundler"
 import { selectComposition, renderMedia } from "@remotion/renderer"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
-import { activeTenants } from "@/lib/platform/gating"
+import { activeTenants, clip4kEnabled } from "@/lib/platform/gating"
 import {
   claimClipSource,
   claimNextClip,
@@ -34,7 +34,9 @@ import { clipCompositionId } from "../src/Root"
 
 const PORT = Number(process.env.PORT ?? 3300)
 const CONCURRENCY = Math.max(1, Number(process.env.CLIP_RENDER_CONCURRENCY ?? 2))
-const RENDER_TIMEOUT_MS = Math.max(30_000, Number(process.env.CLIP_RENDER_TIMEOUT_MS ?? 600_000))
+// Dimensionado para o PIOR caso (4K, 15 min): job pendurado vira falha explícita,
+// nunca trava indefinidamente. Ajustável por env.
+const RENDER_TIMEOUT_MS = Math.max(60_000, Number(process.env.CLIP_RENDER_TIMEOUT_MS ?? 3_600_000))
 const STALE_SECONDS = Math.max(300, Number(process.env.CLIP_STALE_SECONDS ?? 1800))
 // Teto de clipes renderizando ao mesmo tempo por tenant (fila por tenant, §7) — um
 // cliente não monopoliza a capacidade. Coordenado via DB, vale entre réplicas.
@@ -107,6 +109,9 @@ async function renderClip(sql: ReturnType<typeof getDb>, tenantId: string, item:
     const sourceUrl = publicUrlForKey(tenantId, props.sourceKey)
     const serveUrl = await getServeUrl()
 
+    // 4K só no Premium: pede 2× o canvas quando o clipe marca hd E o tenant tem direito.
+    const scale = props.hd && (await clip4kEnabled(sql, tenantId)) ? 2 : 1
+
     const output = join(tmpdir(), `clip-${randomUUID()}.mp4`)
     try {
       const inputProps = { aspect, sourceUrl, brandHandle: handle?.trim() || BRAND_HANDLE, brandLogo, clip: props }
@@ -114,6 +119,7 @@ async function renderClip(sql: ReturnType<typeof getDb>, tenantId: string, item:
       const opts = {
         composition,
         serveUrl,
+        scale, // 2 = 4K (canvas 1080-base × 2)
         codec: "h264" as const,
         outputLocation: output,
         inputProps,
@@ -145,8 +151,12 @@ async function renderClip(sql: ReturnType<typeof getDb>, tenantId: string, item:
       await unlink(output).catch(() => {})
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    console.error(`[clip-worker] falha no clipe ${item.id}:`, msg)
+    const raw = e instanceof Error ? e.message : String(e)
+    // Job pendurado vira falha explícita e clara (não fica em 'rendering' para sempre).
+    const msg = /timeout/i.test(raw)
+      ? `O render excedeu o tempo limite (${Math.round(RENDER_TIMEOUT_MS / 60000)} min). Tente um corte mais curto ou 1080p.`
+      : raw
+    console.error(`[clip-worker] falha no clipe ${item.id}:`, raw)
     await withTenant(sql, tenantId, (tx) => setRenderStatus(tx, item.id, "error", msg)).catch(() => {})
   }
 }

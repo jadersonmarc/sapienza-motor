@@ -1,7 +1,7 @@
 import { authed, isResponse, json } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
-import { canOperate } from "@/lib/platform/gating"
+import { canOperate, clip4kEnabled } from "@/lib/platform/gating"
 import {
   getClipEditContext,
   updateClipPropsInPlace,
@@ -14,7 +14,7 @@ import { pokeClipWorker } from "../../poke"
 
 export const runtime = "nodejs"
 
-const MAX_CLIP_MS = 300_000 // Onda 1: cortes até 5 min
+const MAX_CLIP_MS = 900_000 // Onda 2: cortes até 15 min
 
 type PatchBody = {
   inMs?: number
@@ -23,6 +23,7 @@ type PatchBody = {
   crop?: { x: number; y: number; scale: number }
   brandOn?: boolean
   captionPosition?: "bottom" | "center" | "top"
+  hd?: boolean // exportar em 4K (só Premium)
 }
 
 // PATCH /api/v1/content/clip/item/[id] — editor-lite: reajusta o corte (in/out),
@@ -48,6 +49,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const next: ClipProps = { ...props }
   if (body.aspect === "9x16" || body.aspect === "16x9") next.aspect = body.aspect
   if (typeof body.brandOn === "boolean") next.brandOn = body.brandOn
+  if (typeof body.hd === "boolean") {
+    // 4K só no Premium; pedir 4K sem direito é rejeitado (não vira 1080p silencioso).
+    if (body.hd && !(await clip4kEnabled(sql, a.tenantId))) {
+      return json(403, { error: "exportação 4K disponível apenas no plano Premium" })
+    }
+    next.hd = body.hd
+  }
   if (body.crop) {
     const clamp = (v: number) => Math.min(1, Math.max(0, Number(v)))
     next.crop = { x: clamp(body.crop.x), y: clamp(body.crop.y), scale: Math.max(1, Number(body.crop.scale) || 1) }

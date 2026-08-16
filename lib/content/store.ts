@@ -216,6 +216,7 @@ export type ClipItemView = {
   in_ms: number | null
   out_ms: number | null
   brand_on: boolean | null
+  hd: boolean | null
 }
 
 /** Clipes gerados a partir de uma fonte (para o detalhe/grade do console). Traz os
@@ -226,7 +227,8 @@ export async function listClipsForSource(tx: Tx, sourceId: string): Promise<Clip
            (cr.clip_props->>'score')::int AS score,
            (cr.clip_props->>'inMs')::int  AS in_ms,
            (cr.clip_props->>'outMs')::int AS out_ms,
-           (cr.clip_props->>'brandOn')::boolean AS brand_on
+           (cr.clip_props->>'brandOn')::boolean AS brand_on,
+           (cr.clip_props->>'hd')::boolean AS hd
       FROM content_items ci
       LEFT JOIN content_revisions cr ON cr.id = ci.current_revision_id
      WHERE ci.is_clip = true AND ci.clip_source_id = ${sourceId}

@@ -127,6 +127,21 @@ export async function clipperEnabled(sql: Sql, tenantId: string): Promise<boolea
   return false
 }
 
+// Exportação 4K do Clipper — só Premium (SPEC Onda 2; 1080p é o padrão). Vem de
+// product_rules.rules.clipper_4k = { start, pro, scale }. Fallback false.
+export async function clip4kEnabled(sql: Sql, tenantId: string): Promise<boolean> {
+  const tier = await tierOf(sql, tenantId)
+  if (!tier) return false
+  const rules = await productRules(sql)
+  const map = rules.clipper_4k
+  if (map && typeof map === "object") {
+    const v = (map as Record<string, unknown>)[tier]
+    if (typeof v === "number") return v === 1
+    if (typeof v === "boolean") return v
+  }
+  return false
+}
+
 // LIMITE OPERACIONAL de horas de vídeo-fonte por ciclo (SPEC §5.2) — NÃO é métrica
 // de fatura, é teto para proteger a fila. Vem de product_rules.rules.clipper_hours =
 // { start, pro, scale } (horas). Fallback 0 = bloqueia (não chutar liberado). 0 no

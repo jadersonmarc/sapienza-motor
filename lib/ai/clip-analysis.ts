@@ -1,5 +1,8 @@
-import { callStructured } from "./client"
+import { callStructured, type AiUsage } from "./client"
 import type { ClipOverlay, ClipSuggestion, TranscriptWord } from "@/lib/content/clip-types"
+
+// Teto de duração de corte (SPEC Onda 2): 15 min. 1080p é o padrão; 4K é gate por tier.
+export const MAX_CLIP_SEC = 900
 
 // Seleção de cortes (SPEC §9): o modelo lê a transcrição e devolve os melhores
 // momentos, ranqueados. A pontuação é ordenação RELATIVA dentro do vídeo, não
@@ -71,7 +74,7 @@ export function validateClips(
   transcript: string,
   opts: { maxDurationSec?: number } = {},
 ): ClipSuggestion[] {
-  const maxDur = opts.maxDurationSec ?? 300 // Onda 1: cortes até 5 min
+  const maxDur = opts.maxDurationSec ?? MAX_CLIP_SEC
   const out: ClipSuggestion[] = []
   for (const c of raw.clips ?? []) {
     if (
@@ -183,9 +186,9 @@ export function sliceWords(words: TranscriptWord[], startMs: number, endMs: numb
 export async function analyzeClips(
   transcript: string,
   opts: { model?: string; minDurationSec?: number; maxDurationSec?: number } = {},
-): Promise<{ clips: ClipSuggestion[]; model: string }> {
+): Promise<{ clips: ClipSuggestion[]; model: string; usage: AiUsage }> {
   const minDur = opts.minDurationSec ?? 15
-  const maxDur = opts.maxDurationSec ?? 300
+  const maxDur = opts.maxDurationSec ?? MAX_CLIP_SEC
   const system =
     "Você é um editor de vídeo que identifica os melhores momentos de um vídeo longo para virarem clipes curtos de redes sociais. " +
     "Receba a TRANSCRIÇÃO (com marcações de tempo aproximadas) e escolha os trechos de maior potencial: ganchos, afirmações " +
@@ -195,7 +198,7 @@ export async function analyzeClips(
     "validação — se não bater, o corte é descartado). Escreva em português."
   const user = `TRANSCRIÇÃO:\n\n${transcript}`
 
-  const { data, model } = await callStructured<{ clips: Partial<ClipSuggestion>[] }>({
+  const { data, model, usage } = await callStructured<{ clips: Partial<ClipSuggestion>[] }>({
     system,
     user,
     schema: CLIP_SCHEMA,
@@ -203,5 +206,5 @@ export async function analyzeClips(
     effort: "medium",
     maxTokens: 8000,
   })
-  return { clips: validateClips(data, transcript, { maxDurationSec: maxDur }), model }
+  return { clips: validateClips(data, transcript, { maxDurationSec: maxDur }), model, usage }
 }

@@ -65,6 +65,8 @@ export type ClipProps = {
   overlays?: ClipOverlay[]
   /** aplica logo+handle do tenant (desligável por clipe). */
   brandOn: boolean
+  /** exportar em 4K (2× o canvas). Só vale se o tenant é Premium (gate no render). */
+  hd?: boolean
   /** score da análise (0–100, ordenação relativa) — para ranquear na grade. */
   score: number
 }

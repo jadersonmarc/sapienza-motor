@@ -18,6 +18,8 @@ import {
   setRenderStatus,
 } from "@/lib/content/store"
 import { reserveClipHours, refundClipHours } from "@/lib/content/quota"
+import { emitUsageRecorded } from "@/lib/platform/events"
+import { currentPeriod } from "@/lib/platform/period"
 import { sttFromEnv, type SttProvider } from "@/lib/platform/stt"
 import { analyzeClips, sliceWords, buildOverlays } from "@/lib/ai/clip-analysis"
 import type { ClipProps, ClipAspect, ClipSuggestion, TranscriptWord } from "@/lib/content/clip-types"
@@ -234,6 +236,19 @@ export async function runSourcePipeline(
     // 4) Análise: seleciona os cortes (guardrail source_quote aplicado dentro).
     await withTenant(sql, tenantId, (tx) => setClipSourceStatus(tx, sourceId, "analyzing"))
     const analysis = await analyzeClips(transcript.text, { model: deps.model })
+    // Instrumentação de custo por job (etapa 3): tokens da análise, ao lado das horas
+    // (clipper_minutos) e do render_ms. clipper_tokens é LIMITE OPERACIONAL/telemetria,
+    // NÃO fatura — o fechamento junta só metric='peca'. Não toca close.ts/plans.
+    const tokens = analysis.usage.inputTokens + analysis.usage.outputTokens
+    console.log(
+      `[clip][analyze] source=${sourceId} model=${analysis.model} ` +
+        `in_tokens=${analysis.usage.inputTokens} out_tokens=${analysis.usage.outputTokens} clips=${analysis.clips.length}`,
+    )
+    if (tokens > 0) {
+      await withTenant(sql, tenantId, (tx) =>
+        emitUsageRecorded(tx, { tenantId, metric: "clipper_tokens", count: tokens, period: currentPeriod() }),
+      )
+    }
 
     // 5) Geração: cada corte vira um content_item is_clip com clip_props, enfileirado
     //    para render (nasce 'preparing', vira 'queued' só após gravar as props).

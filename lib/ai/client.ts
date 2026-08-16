@@ -20,7 +20,9 @@ type StructuredOpts = {
   model?: string // sobrescreve o modelo padrão do produto (config por tenant)
 }
 
-export async function callStructured<T>(opts: StructuredOpts): Promise<{ data: T; model: string }> {
+export type AiUsage = { inputTokens: number; outputTokens: number }
+
+export async function callStructured<T>(opts: StructuredOpts): Promise<{ data: T; model: string; usage: AiUsage }> {
   if (!isAiConfigured()) throw new Error("ANTHROPIC_API_KEY não configurada.")
   const client = new Anthropic()
 
@@ -48,7 +50,11 @@ export async function callStructured<T>(opts: StructuredOpts): Promise<{ data: T
     throw new Error("Resposta do modelo sem conteúdo de texto.")
   }
   try {
-    return { data: JSON.parse(text.text) as T, model: response.model }
+    const usage: AiUsage = {
+      inputTokens: response.usage?.input_tokens ?? 0,
+      outputTokens: response.usage?.output_tokens ?? 0,
+    }
+    return { data: JSON.parse(text.text) as T, model: response.model, usage }
   } catch {
     throw new Error("Não foi possível interpretar a resposta do modelo (JSON inválido).")
   }
