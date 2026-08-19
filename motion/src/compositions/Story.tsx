@@ -1,7 +1,7 @@
 import React from "react"
 import { Series, Audio, staticFile, useCurrentFrame, useVideoConfig, interpolate } from "remotion"
 import type { Field } from "../../../lib/brand/tokens"
-import type { MotionAspect, MotionScene, SceneBlock, StoryProps } from "../../../lib/content/motion-types"
+import type { MotionAspect, MotionImage, MotionScene, SceneBlock, StoryProps } from "../../../lib/content/motion-types"
 import { trackFor } from "../../../lib/content/motion-audio"
 import { Scene } from "../brand"
 import { framesForSec } from "../aspects"
@@ -94,13 +94,14 @@ export function Story({
   aspect,
   brandHandle,
   brandLogo,
+  image = null,
   scenes,
   theme = "ink",
   audio = "none",
-}: StoryProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
+}: StoryProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null }) {
   const track = trackFor(audio)
   return (
-    <Scene aspect={aspect} field={theme} brandHandle={brandHandle} brandLogo={brandLogo}>
+    <Scene aspect={aspect} field={theme} brandHandle={brandHandle} brandLogo={brandLogo} image={image}>
       {track ? <Soundtrack file={track.file} /> : null}
       <StoryScenes scenes={scenes} aspect={aspect} field={theme} />
     </Scene>

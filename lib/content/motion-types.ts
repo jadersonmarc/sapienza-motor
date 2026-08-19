@@ -19,6 +19,11 @@ export function fanoutAspects(primary: MotionAspect): MotionAspect[] {
   return out
 }
 
+// Imagem de fundo opcional da peça (item 7). Entra na camada Scene (não nos *Body).
+// scrimOpacity é ADAPTATIVO por luminância (calculado no worker): a tabela por preset
+// é o PISO; imagem clara sobe o scrim. url = proxy público do R2 (resolvido no worker).
+export type MotionImage = { url: string; scrimOpacity: number }
+
 export type HeadlineProps = { kind: "headline"; words: string[]; highlightIndex: number }
 export type QuoteProps = { kind: "quote"; quote: string; keyphrase: string; author: string }
 export type SlidesProps = { kind: "slides"; slides: { index: number; title: string }[] }

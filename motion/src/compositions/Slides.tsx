@@ -1,7 +1,7 @@
 import React from "react"
 import { useCurrentFrame, useVideoConfig, Easing } from "remotion"
 import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
-import type { SlidesProps, MotionAspect } from "../../../lib/content/motion-types"
+import type { SlidesProps, MotionAspect, MotionImage } from "../../../lib/content/motion-types"
 import { Scene } from "../brand"
 import { ASPECTS } from "../aspects"
 
@@ -89,10 +89,12 @@ export function SlidesBody({
   )
 }
 
-export function Slides(props: SlidesProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
+export function Slides(
+  props: SlidesProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null },
+) {
   const { durationInFrames } = useVideoConfig()
   return (
-    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo}>
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo} image={props.image}>
       <SlidesBody aspect={props.aspect} field="ink" kind="slides" slides={props.slides} durationInFrames={durationInFrames} />
     </Scene>
   )

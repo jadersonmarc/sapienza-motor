@@ -1,9 +1,19 @@
 import React from "react"
 import { AbsoluteFill, Img, useCurrentFrame, interpolate, Easing } from "remotion"
 import { fieldStyle, fonts, type Field } from "../../lib/brand/tokens"
-import type { MotionAspect } from "../../lib/content/motion-types"
+import type { MotionAspect, MotionImage } from "../../lib/content/motion-types"
 import { ASPECTS } from "./aspects"
 import "./fonts"
+
+/** hex (#RRGGBB) → rgba com opacidade. Usado no scrim (tinta = cor do campo). */
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace("#", "")
+  const n = parseInt(h.length === 3 ? h.replace(/(.)/g, "$1$1") : h, 16)
+  const r = (n >> 16) & 255
+  const g = (n >> 8) & 255
+  const b = n & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
 
 // Cena base on-brand: campo (ink/surface) dos tokens, margens seguras por aspect,
 // e o rodapé de marca (handle + marca gráfica) — que entra cedo (~frame 8) e fica.
@@ -20,12 +30,16 @@ export function Scene({
   field = "ink",
   brandHandle = "@sapienzalabs",
   brandLogo = "",
+  image = null,
   children,
 }: {
   aspect: MotionAspect
   field?: Field
   brandHandle?: string
   brandLogo?: string
+  /** Imagem de fundo opcional (item 7). Fica atrás de um scrim adaptativo; o texto
+   *  nunca toca a imagem crua. Sem imagem, o campo chapado de sempre. */
+  image?: MotionImage | null
   children: React.ReactNode
 }) {
   const { w } = ASPECTS[aspect]
@@ -33,6 +47,16 @@ export function Scene({
   const pad = safePad(w)
   return (
     <AbsoluteFill style={{ backgroundColor: fs.bg }}>
+      {image ? (
+        <>
+          {/* cover = corte central (não distorce), independente da proporção do destino. */}
+          <AbsoluteFill>
+            <Img src={image.url} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          </AbsoluteFill>
+          {/* scrim on-brand (tinta do campo) com opacidade ADAPTATIVA por luminância. */}
+          <AbsoluteFill style={{ backgroundColor: hexToRgba(fs.bg, image.scrimOpacity) }} />
+        </>
+      ) : null}
       <AbsoluteFill style={{ padding: pad, display: "flex", flexDirection: "column" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
           {children}

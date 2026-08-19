@@ -1,7 +1,7 @@
 import React from "react"
 import { useCurrentFrame, interpolate } from "remotion"
 import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
-import type { HeadlineProps, MotionAspect } from "../../../lib/content/motion-types"
+import type { HeadlineProps, MotionAspect, MotionImage } from "../../../lib/content/motion-types"
 import { Scene, easeOut } from "../brand"
 import { ASPECTS } from "../aspects"
 
@@ -84,9 +84,11 @@ export function HeadlineBody({
 }
 
 // Composition de cena única (compat): <Scene> + corpo, campo escuro como sempre.
-export function Headline(props: HeadlineProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
+export function Headline(
+  props: HeadlineProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null },
+) {
   return (
-    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo}>
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo} image={props.image}>
       <HeadlineBody aspect={props.aspect} field="ink" kind="headline" words={props.words} highlightIndex={props.highlightIndex} />
     </Scene>
   )

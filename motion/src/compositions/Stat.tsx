@@ -1,7 +1,7 @@
 import React from "react"
 import { useCurrentFrame, useVideoConfig, spring, interpolate } from "remotion"
 import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
-import type { StatProps, MotionAspect } from "../../../lib/content/motion-types"
+import type { StatProps, MotionAspect, MotionImage } from "../../../lib/content/motion-types"
 import { Scene, easeOut } from "../brand"
 import { ASPECTS } from "../aspects"
 
@@ -100,9 +100,11 @@ export function StatBody({
   )
 }
 
-export function Stat(props: StatProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
+export function Stat(
+  props: StatProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null },
+) {
   return (
-    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo}>
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo} image={props.image}>
       <StatBody
         aspect={props.aspect}
         field="ink"

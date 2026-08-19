@@ -26,6 +26,8 @@ export type ContentItem = {
   is_motion: boolean
   motion_preset: string | null
   motion_aspect: string | null
+  /** imagem de fundo opcional da peça de motion (item 7) — URL do proxy do R2. */
+  motion_image_url: string | null
   video_url: string | null
   /** Fan-out: map aspecto→URL de todos os formatos renderizados desta peça. */
   video_urls: Record<string, string> | null
@@ -77,12 +79,12 @@ export async function finishGenerating(tx: Tx, id: string, error: string | null)
  *  Só vira 'queued' quando a geração termina (setRenderStatus). Sem revisão ainda. */
 export async function createMotionItem(
   tx: Tx,
-  input: { slug: string; format?: string; authorId?: string | null; brief?: string | null },
+  input: { slug: string; format?: string; authorId?: string | null; brief?: string | null; imageUrl?: string | null },
 ): Promise<{ id: string }> {
   const [item] = (await tx`
-    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status, brief, config_version)
+    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status, brief, motion_image_url, config_version)
     VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, true, 'preparing',
-            ${input.brief ?? null}, (SELECT config_version FROM editor_config WHERE id = true))
+            ${input.brief ?? null}, ${input.imageUrl ?? null}, (SELECT config_version FROM editor_config WHERE id = true))
     RETURNING id
   `) as unknown as { id: string }[]
   return item

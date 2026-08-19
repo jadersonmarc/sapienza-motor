@@ -1,4 +1,5 @@
 import http from "node:http"
+import { spawn } from "node:child_process"
 import { readFile, unlink } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
@@ -13,6 +14,7 @@ import { listQueuedMotion, getMotionProps, setItemVideo, setItemVideos, setRende
 import { getEditorConfig } from "@/lib/content/editor-config"
 import { trackFor } from "@/lib/content/motion-audio"
 import { fanoutAspects, type MotionAspect, type StoryProps } from "@/lib/content/motion-types"
+import { scrimForPreset } from "@/lib/content/motion-image"
 import { contentTransition } from "@/lib/content/transition"
 import { uploadObject, isStorageConfigured } from "@/lib/storage/s3"
 import { motionVideoKey } from "@/lib/storage/keys"
@@ -64,6 +66,43 @@ async function resolveLogo(url: string | null | undefined): Promise<string> {
   }
 }
 
+// Luminância média (0..1) da imagem via ffmpeg (downscale 1×1 → 1 pixel RGB). Robusto
+// (decodifica jpg/png/webp). Falha/timeout → 0.5 (neutro → scrim fica no piso). O
+// bundle do @remotion/renderer traz o ffmpeg; a imagem tem ffmpeg CLI no Dockerfile.
+async function imageLuminance(url: string): Promise<number> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return 0.5
+    const bytes = Buffer.from(await res.arrayBuffer())
+    const rgb = await new Promise<Buffer>((resolve, reject) => {
+      const p = spawn("ffmpeg", ["-i", "pipe:0", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], {
+        stdio: ["pipe", "pipe", "ignore"],
+      })
+      const chunks: Buffer[] = []
+      const timer = setTimeout(() => {
+        p.kill("SIGKILL")
+        reject(new Error("ffmpeg timeout"))
+      }, 8000)
+      p.stdout.on("data", (d) => chunks.push(d))
+      p.on("error", (e) => {
+        clearTimeout(timer)
+        reject(e)
+      })
+      p.on("close", () => {
+        clearTimeout(timer)
+        resolve(Buffer.concat(chunks))
+      })
+      p.stdin.on("error", () => {}) // EPIPE se o ffmpeg fechar antes
+      p.stdin.end(bytes)
+    })
+    if (rgb.length < 3) return 0.5
+    return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255
+  } catch {
+    return 0.5
+  }
+}
+
+
 type QueuedRow = { id: string; slug: string; motion_preset: string | null; motion_aspect: string | null }
 
 async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: QueuedRow): Promise<void> {
@@ -72,9 +111,17 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     if (!isStorageConfigured()) throw new Error("storage R2 não configurado (S3_* / MOTOR_PUBLIC_URL)")
     const preset = item.motion_preset
     const aspect = item.motion_aspect as MotionAspect | null
-    const { data, handle, logoUrl } = await withTenant(sql, tenantId, async (tx) => {
+    const { data, handle, logoUrl, imageUrlDb } = await withTenant(sql, tenantId, async (tx) => {
       const cfg = await getEditorConfig(tx)
-      return { data: await getMotionProps(tx, item.id), handle: cfg.handle, logoUrl: cfg.logo_url }
+      const rows = (await tx`SELECT motion_image_url FROM content_items WHERE id = ${item.id}`) as unknown as {
+        motion_image_url: string | null
+      }[]
+      return {
+        data: await getMotionProps(tx, item.id),
+        handle: cfg.handle,
+        logoUrl: cfg.logo_url,
+        imageUrlDb: rows[0]?.motion_image_url ?? null,
+      }
     })
     if (!preset || !aspect || !data) throw new Error("peça de motion sem preset/aspect/props")
 
@@ -82,6 +129,20 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     // logo quebrado jamais pode derrubar o render do vídeo do cliente. Falha → vazio
     // (o rodapé cai no monograma da inicial do handle).
     const brandLogo = await resolveLogo(logoUrl)
+
+    // Imagem de fundo (item 7): mesma robustez. Se a URL não resolver (objeto sumiu,
+    // R2 fora), renderiza SEM imagem — a peça sai como hoje, que é válido. Scrim é
+    // adaptativo por luminância (imagem clara → scrim mais forte).
+    let image: { url: string; scrimOpacity: number } | null = null
+    if (imageUrlDb) {
+      const resolved = await resolveLogo(imageUrlDb)
+      if (!resolved) {
+        console.warn(`[motion-worker] imagem da peça ${item.id} não resolveu — renderizando sem imagem`)
+      } else {
+        const lum = await imageLuminance(resolved)
+        image = { url: resolved, scrimOpacity: scrimForPreset(preset, lum) }
+      }
+    }
 
     // Trilha (seam): só toca se a faixa do mood existir em public/audio. Sem o
     // arquivo, rebaixa para mudo — o vídeo sai como sempre saiu.
@@ -100,7 +161,7 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     const renderAspect = async (a: MotionAspect): Promise<string> => {
       const output = join(tmpdir(), `motion-${randomUUID()}.mp4`)
       try {
-        const inputProps = { aspect: a, brandHandle: handle?.trim() || BRAND_HANDLE, brandLogo, data }
+        const inputProps = { aspect: a, brandHandle: handle?.trim() || BRAND_HANDLE, brandLogo, image, data }
         const composition = await selectComposition({ serveUrl, id: compositionId(preset, a), inputProps })
         const opts = {
           composition,

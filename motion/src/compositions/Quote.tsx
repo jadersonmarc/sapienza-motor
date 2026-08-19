@@ -1,7 +1,7 @@
 import React from "react"
 import { useCurrentFrame, interpolate } from "remotion"
 import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
-import type { QuoteProps, MotionAspect } from "../../../lib/content/motion-types"
+import type { QuoteProps, MotionAspect, MotionImage } from "../../../lib/content/motion-types"
 import { Scene, easeOut } from "../brand"
 import { ASPECTS } from "../aspects"
 
@@ -96,9 +96,11 @@ export function QuoteBody({
   )
 }
 
-export function Quote(props: QuoteProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string }) {
+export function Quote(
+  props: QuoteProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null },
+) {
   return (
-    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo}>
+    <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo} image={props.image}>
       <QuoteBody aspect={props.aspect} field="ink" kind="quote" quote={props.quote} keyphrase={props.keyphrase} author={props.author} />
     </Scene>
   )

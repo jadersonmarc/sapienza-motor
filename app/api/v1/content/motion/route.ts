@@ -46,8 +46,17 @@ export async function POST(req: Request): Promise<Response> {
     return json(403, { error: "motion não disponível no seu plano (disponível no Pro e no Premium)" })
   }
 
-  const body = (await req.json().catch(() => ({}))) as { prompt?: string; channel?: string; archetype?: string; audio?: string }
+  const body = (await req.json().catch(() => ({}))) as {
+    prompt?: string
+    channel?: string
+    archetype?: string
+    audio?: string
+    imageUrl?: string
+  }
   const prompt = (body.prompt ?? "").trim()
+  // Imagem de fundo opcional (item 7): só aceita URL do proxy de mídia do próprio
+  // tenant (evita SSRF/imagem externa). O worker valida acessibilidade no render.
+  const imageUrl = /^https?:\/\//i.test(body.imageUrl ?? "") && (body.imageUrl ?? "").includes("/api/media/") ? body.imageUrl : null
   // Canal-alvo do vídeo (define o formato da peça). Fase 1 publica pelo Webhook;
   // a Fase 2 publica nativo no canal (instagram/linkedin).
   const channel = body.channel === "linkedin" ? "linkedin" : "instagram"
@@ -80,7 +89,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const slug = `${slugify(prompt) || "motion"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
-    createMotionItem(tx, { slug, format: channel, authorId: a.userId, brief: prompt }),
+    createMotionItem(tx, { slug, format: channel, authorId: a.userId, brief: prompt, imageUrl }),
   )
 
   await runAfterResponse(async () => {
