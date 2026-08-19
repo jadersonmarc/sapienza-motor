@@ -15,6 +15,7 @@ import { getEditorConfig } from "@/lib/content/editor-config"
 import { trackFor } from "@/lib/content/motion-audio"
 import { fanoutAspects, type MotionAspect, type StoryProps } from "@/lib/content/motion-types"
 import { scrimForPreset } from "@/lib/content/motion-image"
+import type { CaptionStyle } from "@/lib/content/caption-style"
 import { contentTransition } from "@/lib/content/transition"
 import { uploadObject, isStorageConfigured } from "@/lib/storage/s3"
 import { motionVideoKey } from "@/lib/storage/keys"
@@ -111,16 +112,21 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     if (!isStorageConfigured()) throw new Error("storage R2 não configurado (S3_* / MOTOR_PUBLIC_URL)")
     const preset = item.motion_preset
     const aspect = item.motion_aspect as MotionAspect | null
-    const { data, handle, logoUrl, imageUrlDb } = await withTenant(sql, tenantId, async (tx) => {
+    const { data, handle, logoUrl, imageUrlDb, caption } = await withTenant(sql, tenantId, async (tx) => {
       const cfg = await getEditorConfig(tx)
-      const rows = (await tx`SELECT motion_image_url FROM content_items WHERE id = ${item.id}`) as unknown as {
+      const rows = (await tx`SELECT motion_image_url, motion_caption_style FROM content_items WHERE id = ${item.id}`) as unknown as {
         motion_image_url: string | null
+        motion_caption_style: CaptionStyle | null
       }[]
+      // Estilo de legenda (8a): override da peça ganha do default do tenant (Brand Kit).
+      // Nenhum dos dois setado → undefined → render idêntico ao anterior.
+      const caption = rows[0]?.motion_caption_style ?? cfg.caption_style ?? undefined
       return {
         data: await getMotionProps(tx, item.id),
         handle: cfg.handle,
         logoUrl: cfg.logo_url,
         imageUrlDb: rows[0]?.motion_image_url ?? null,
+        caption,
       }
     })
     if (!preset || !aspect || !data) throw new Error("peça de motion sem preset/aspect/props")
@@ -161,7 +167,7 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     const renderAspect = async (a: MotionAspect): Promise<string> => {
       const output = join(tmpdir(), `motion-${randomUUID()}.mp4`)
       try {
-        const inputProps = { aspect: a, brandHandle: handle?.trim() || BRAND_HANDLE, brandLogo, image, data }
+        const inputProps = { aspect: a, brandHandle: handle?.trim() || BRAND_HANDLE, brandLogo, image, caption, data }
         const composition = await selectComposition({ serveUrl, id: compositionId(preset, a), inputProps })
         const opts = {
           composition,

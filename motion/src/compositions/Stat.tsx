@@ -2,6 +2,7 @@ import React from "react"
 import { useCurrentFrame, useVideoConfig, spring, interpolate } from "remotion"
 import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
 import type { StatProps, MotionAspect, MotionImage } from "../../../lib/content/motion-types"
+import { type CaptionStyle, motionFallbacks, resolveCaption } from "../../../lib/content/caption-style"
 import { Scene, easeOut } from "../brand"
 import { ASPECTS } from "../aspects"
 
@@ -12,15 +13,17 @@ import { ASPECTS } from "../aspects"
 export function StatBody({
   aspect,
   field = "ink",
+  caption,
   label,
   value,
   suffix,
   subtitle,
-}: StatProps & { aspect: MotionAspect; field?: Field }) {
+}: StatProps & { aspect: MotionAspect; field?: Field; caption?: CaptionStyle }) {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   const { w } = ASPECTS[aspect]
   const fs = fieldStyle[field]
+  const cap = resolveCaption(caption, motionFallbacks(field))
 
   const prog = spring({ frame, fps, config: { damping: 200 }, durationInFrames: 45 })
   const shown = Math.round(value * prog)
@@ -40,7 +43,7 @@ export function StatBody({
           fontFamily: fonts.mono,
           fontWeight: 500,
           fontSize: Math.max(minType.support, Math.round(w * 0.032)),
-          color: fs.accent,
+          color: cap.highlight,
           letterSpacing: 2,
           textTransform: "uppercase",
           opacity: labelOpacity,
@@ -52,18 +55,18 @@ export function StatBody({
       <div style={{ display: "flex", alignItems: "baseline", gap: Math.round(w * 0.01), marginTop: Math.round(w * 0.02) }}>
         <span
           style={{
-            fontFamily: fonts.display,
+            fontFamily: cap.fontFamily,
             fontWeight: 700,
             fontSize: numSize,
             lineHeight: 1,
-            color: fs.fg,
+            color: cap.color,
             fontVariantNumeric: "tabular-nums",
           }}
         >
           {shown.toLocaleString("pt-BR")}
         </span>
         {suffix ? (
-          <span style={{ fontFamily: fonts.display, fontWeight: 700, fontSize: Math.round(numSize * 0.5), color: fs.accent }}>
+          <span style={{ fontFamily: cap.fontFamily, fontWeight: 700, fontSize: Math.round(numSize * 0.5), color: cap.highlight }}>
             {suffix}
           </span>
         ) : null}
@@ -79,7 +82,7 @@ export function StatBody({
         }}
       >
         <div
-          style={{ height: "100%", width: "100%", backgroundColor: fs.accent, transform: `scaleX(${prog})`, transformOrigin: "left" }}
+          style={{ height: "100%", width: "100%", backgroundColor: cap.highlight, transform: `scaleX(${prog})`, transformOrigin: "left" }}
         />
       </div>
 
@@ -89,7 +92,7 @@ export function StatBody({
           fontFamily: fonts.sans,
           fontWeight: 400,
           fontSize: Math.max(minType.support, Math.round(w * 0.03)),
-          color: fs.fg,
+          color: cap.color,
           opacity: subOpacity,
           transform: `translateY(${subY}px)`,
         }}
@@ -101,13 +104,20 @@ export function StatBody({
 }
 
 export function Stat(
-  props: StatProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null },
+  props: StatProps & {
+    aspect: MotionAspect
+    brandHandle?: string
+    brandLogo?: string
+    image?: MotionImage | null
+    caption?: CaptionStyle
+  },
 ) {
   return (
     <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo} image={props.image}>
       <StatBody
         aspect={props.aspect}
         field="ink"
+        caption={props.caption}
         kind="stat"
         label={props.label}
         value={props.value}

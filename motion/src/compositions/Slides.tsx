@@ -2,6 +2,7 @@ import React from "react"
 import { useCurrentFrame, useVideoConfig, Easing } from "remotion"
 import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
 import type { SlidesProps, MotionAspect, MotionImage } from "../../../lib/content/motion-types"
+import { type CaptionStyle, motionFallbacks, resolveCaption } from "../../../lib/content/caption-style"
 import { Scene } from "../brand"
 import { ASPECTS } from "../aspects"
 
@@ -12,12 +13,14 @@ import { ASPECTS } from "../aspects"
 export function SlidesBody({
   aspect,
   field = "ink",
+  caption,
   slides,
   durationInFrames,
-}: SlidesProps & { aspect: MotionAspect; field?: Field; durationInFrames: number }) {
+}: SlidesProps & { aspect: MotionAspect; field?: Field; caption?: CaptionStyle; durationInFrames: number }) {
   const frame = useCurrentFrame()
   const { w } = ASPECTS[aspect]
   const fs = fieldStyle[field]
+  const cap = resolveCaption(caption, motionFallbacks(field))
   const list = slides.slice(0, 4)
   const n = Math.max(list.length, 1)
   const seg = durationInFrames / n
@@ -50,7 +53,7 @@ export function SlidesBody({
                   fontFamily: fonts.mono,
                   fontWeight: 500,
                   fontSize: Math.max(minType.mono, Math.round(w * 0.03)),
-                  color: fs.accent,
+                  color: cap.highlight,
                   letterSpacing: 2,
                 }}
               >
@@ -58,11 +61,11 @@ export function SlidesBody({
               </span>
               <span
                 style={{
-                  fontFamily: fonts.display,
+                  fontFamily: cap.fontFamily,
                   fontWeight: 700,
                   fontSize: titleSize,
                   lineHeight: 1.05,
-                  color: fs.fg,
+                  color: cap.color,
                 }}
               >
                 {s.title}
@@ -80,7 +83,7 @@ export function SlidesBody({
               height: 8,
               width: i === activeDot ? 44 : 16,
               borderRadius: 4,
-              backgroundColor: i === activeDot ? fs.accent : fs.line,
+              backgroundColor: i === activeDot ? cap.highlight : fs.line,
             }}
           />
         ))}
@@ -90,12 +93,18 @@ export function SlidesBody({
 }
 
 export function Slides(
-  props: SlidesProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null },
+  props: SlidesProps & {
+    aspect: MotionAspect
+    brandHandle?: string
+    brandLogo?: string
+    image?: MotionImage | null
+    caption?: CaptionStyle
+  },
 ) {
   const { durationInFrames } = useVideoConfig()
   return (
     <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo} image={props.image}>
-      <SlidesBody aspect={props.aspect} field="ink" kind="slides" slides={props.slides} durationInFrames={durationInFrames} />
+      <SlidesBody aspect={props.aspect} field="ink" caption={props.caption} kind="slides" slides={props.slides} durationInFrames={durationInFrames} />
     </Scene>
   )
 }

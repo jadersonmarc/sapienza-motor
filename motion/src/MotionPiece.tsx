@@ -1,5 +1,6 @@
 import React from "react"
 import type { MotionAspect, MotionImage, MotionProps } from "../../lib/content/motion-types"
+import type { CaptionStyle } from "../../lib/content/caption-style"
 import { Headline } from "./compositions/Headline"
 import { Quote } from "./compositions/Quote"
 import { Slides } from "./compositions/Slides"
@@ -14,20 +15,21 @@ export type MotionPieceProps = {
   brandHandle?: string
   brandLogo?: string
   image?: MotionImage | null
+  caption?: CaptionStyle
   data: MotionProps
 }
 
-export const MotionPiece: React.FC<MotionPieceProps> = ({ aspect, brandHandle, brandLogo, image, data }) => {
+export const MotionPiece: React.FC<MotionPieceProps> = ({ aspect, brandHandle, brandLogo, image, caption, data }) => {
   switch (data.kind) {
     case "headline":
-      return <Headline aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} {...data} />
+      return <Headline aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} caption={caption} {...data} />
     case "quote":
-      return <Quote aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} {...data} />
+      return <Quote aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} caption={caption} {...data} />
     case "slides":
-      return <Slides aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} {...data} />
+      return <Slides aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} caption={caption} {...data} />
     case "stat":
-      return <Stat aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} {...data} />
+      return <Stat aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} caption={caption} {...data} />
     case "story":
-      return <Story aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} {...data} />
+      return <Story aspect={aspect} brandHandle={brandHandle} brandLogo={brandLogo} image={image} caption={caption} {...data} />
   }
 }

@@ -1,5 +1,6 @@
 import type { Tx, Json } from "@/lib/db"
 import type { ContentStatus } from "@/lib/content/state-machine"
+import type { CaptionStyle } from "@/lib/content/caption-style"
 
 // Store tenant-scoped (queries sob withTenant; sem tenant_id, sem prefixo de schema —
 // o search_path é a fronteira). SQL cru (postgres-js) para revisabilidade.
@@ -79,12 +80,21 @@ export async function finishGenerating(tx: Tx, id: string, error: string | null)
  *  Só vira 'queued' quando a geração termina (setRenderStatus). Sem revisão ainda. */
 export async function createMotionItem(
   tx: Tx,
-  input: { slug: string; format?: string; authorId?: string | null; brief?: string | null; imageUrl?: string | null },
+  input: {
+    slug: string
+    format?: string
+    authorId?: string | null
+    brief?: string | null
+    imageUrl?: string | null
+    captionStyle?: CaptionStyle | null
+  },
 ): Promise<{ id: string }> {
   const [item] = (await tx`
-    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status, brief, motion_image_url, config_version)
+    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status, brief, motion_image_url, motion_caption_style, config_version)
     VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, true, 'preparing',
-            ${input.brief ?? null}, ${input.imageUrl ?? null}, (SELECT config_version FROM editor_config WHERE id = true))
+            ${input.brief ?? null}, ${input.imageUrl ?? null},
+            ${input.captionStyle ? tx.json(input.captionStyle) : null},
+            (SELECT config_version FROM editor_config WHERE id = true))
     RETURNING id
   `) as unknown as { id: string }[]
   return item

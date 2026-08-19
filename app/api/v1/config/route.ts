@@ -2,6 +2,7 @@ import { authed, isResponse, json, requireRole } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { getEditorConfig, upsertEditorConfig, type ContentFormat, type EditorConfig } from "@/lib/content/editor-config"
+import { sanitizeCaptionStyle } from "@/lib/content/caption-style"
 
 export const runtime = "nodejs"
 
@@ -46,6 +47,8 @@ export async function PUT(req: Request): Promise<Response> {
       const u = String(body.logo_url ?? "").trim().slice(0, 500)
       return u === "" || /^https:\/\//i.test(u) ? u : ""
     })(),
+    // Estilo de legenda default do motion (Brand Kit): só tokens; inválido/vazio = null.
+    caption_style: sanitizeCaptionStyle(body.caption_style),
   }
 
   const sql = getDb()

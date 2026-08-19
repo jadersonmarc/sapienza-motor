@@ -9,6 +9,7 @@ import { MOTION_ARCHETYPES, type MotionArchetype } from "@/lib/content/motion-ty
 import { MOTION_MOODS, type MotionMood } from "@/lib/content/motion-audio"
 import { slugify } from "@/lib/content/slug"
 import { reserveGeneration, refundGeneration, GenerationQuotaError } from "@/lib/content/quota"
+import { sanitizeCaptionStyle } from "@/lib/content/caption-style"
 
 export const runtime = "nodejs"
 
@@ -52,8 +53,12 @@ export async function POST(req: Request): Promise<Response> {
     archetype?: string
     audio?: string
     imageUrl?: string
+    captionStyle?: unknown
   }
   const prompt = (body.prompt ?? "").trim()
+  // Estilo de legenda por peça (item 8a): só tokens (fonte/cor/realce). null = usa o
+  // default do tenant (Brand Kit) ou os valores atuais.
+  const captionStyle = sanitizeCaptionStyle(body.captionStyle)
   // Imagem de fundo opcional (item 7): só aceita URL do proxy de mídia do próprio
   // tenant (evita SSRF/imagem externa). O worker valida acessibilidade no render.
   const imageUrl = /^https?:\/\//i.test(body.imageUrl ?? "") && (body.imageUrl ?? "").includes("/api/media/") ? body.imageUrl : null
@@ -89,7 +94,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const slug = `${slugify(prompt) || "motion"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
-    createMotionItem(tx, { slug, format: channel, authorId: a.userId, brief: prompt, imageUrl }),
+    createMotionItem(tx, { slug, format: channel, authorId: a.userId, brief: prompt, imageUrl, captionStyle }),
   )
 
   await runAfterResponse(async () => {

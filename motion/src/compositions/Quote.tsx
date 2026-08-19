@@ -2,6 +2,7 @@ import React from "react"
 import { useCurrentFrame, interpolate } from "remotion"
 import { fieldStyle, fonts, minType, type Field } from "../../../lib/brand/tokens"
 import type { QuoteProps, MotionAspect, MotionImage } from "../../../lib/content/motion-types"
+import { type CaptionStyle, motionFallbacks, resolveCaption } from "../../../lib/content/caption-style"
 import { Scene, easeOut } from "../brand"
 import { ASPECTS } from "../aspects"
 
@@ -11,13 +12,15 @@ import { ASPECTS } from "../aspects"
 export function QuoteBody({
   aspect,
   field = "ink",
+  caption,
   quote,
   keyphrase,
   author,
-}: QuoteProps & { aspect: MotionAspect; field?: Field }) {
+}: QuoteProps & { aspect: MotionAspect; field?: Field; caption?: CaptionStyle }) {
   const frame = useCurrentFrame()
   const { w } = ASPECTS[aspect]
   const fs = fieldStyle[field]
+  const cap = resolveCaption(caption, motionFallbacks(field))
   const size = Math.max(minType.title - 8, Math.round(w * 0.072))
 
   const qOpacity = interpolate(frame, [0, 15], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
@@ -49,14 +52,14 @@ export function QuoteBody({
     <div style={{ opacity: qOpacity, transform: `translateY(${qY}px)` }}>
       <div
         style={{
-          fontFamily: fonts.display,
+          fontFamily: cap.fontFamily,
           fontWeight: 600,
           fontSize: size,
           lineHeight: 1.18,
-          color: fs.fg,
+          color: cap.color,
         }}
       >
-        <span style={{ color: fs.accent }}>“</span>
+        <span style={{ color: cap.highlight }}>“</span>
         {before}
         {has && (
           <span style={{ position: "relative", display: "inline-block", padding: "0 0.08em" }}>
@@ -67,16 +70,16 @@ export function QuoteBody({
                 top: "0.08em",
                 bottom: "0.08em",
                 width: "100%",
-                backgroundColor: fs.accent,
+                backgroundColor: cap.highlight,
                 transform: `scaleX(${bar})`,
                 transformOrigin: "left",
               }}
             />
-            <span style={{ position: "relative", color: bar > 0.5 ? fs.bg : fs.fg }}>{key}</span>
+            <span style={{ position: "relative", color: bar > 0.5 ? fs.bg : cap.color }}>{key}</span>
           </span>
         )}
         {after}
-        <span style={{ color: fs.accent }}>”</span>
+        <span style={{ color: cap.highlight }}>”</span>
       </div>
       <div
         style={{
@@ -86,7 +89,7 @@ export function QuoteBody({
           fontFamily: fonts.mono,
           fontWeight: 500,
           fontSize: Math.max(minType.mono, Math.round(w * 0.028)),
-          color: fs.accent,
+          color: cap.highlight,
           letterSpacing: 1,
         }}
       >
@@ -97,11 +100,17 @@ export function QuoteBody({
 }
 
 export function Quote(
-  props: QuoteProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null },
+  props: QuoteProps & {
+    aspect: MotionAspect
+    brandHandle?: string
+    brandLogo?: string
+    image?: MotionImage | null
+    caption?: CaptionStyle
+  },
 ) {
   return (
     <Scene aspect={props.aspect} field="ink" brandHandle={props.brandHandle} brandLogo={props.brandLogo} image={props.image}>
-      <QuoteBody aspect={props.aspect} field="ink" kind="quote" quote={props.quote} keyphrase={props.keyphrase} author={props.author} />
+      <QuoteBody aspect={props.aspect} field="ink" caption={props.caption} kind="quote" quote={props.quote} keyphrase={props.keyphrase} author={props.author} />
     </Scene>
   )
 }

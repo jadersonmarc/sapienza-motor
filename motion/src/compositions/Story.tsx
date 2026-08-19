@@ -2,6 +2,7 @@ import React from "react"
 import { Series, Audio, staticFile, useCurrentFrame, useVideoConfig, interpolate } from "remotion"
 import type { Field } from "../../../lib/brand/tokens"
 import type { MotionAspect, MotionImage, MotionScene, SceneBlock, StoryProps } from "../../../lib/content/motion-types"
+import type { CaptionStyle } from "../../../lib/content/caption-style"
 import { trackFor } from "../../../lib/content/motion-audio"
 import { Scene } from "../brand"
 import { framesForSec } from "../aspects"
@@ -17,19 +18,32 @@ import { CtaBody } from "./Cta"
 // campo cromático do story. layout="none" mantém o bloco no fluxo (centralizado)
 // do Scene, sem sobrepor o rodapé. Um drift sutil evita "tela congelada".
 
-function BlockBody({ block, aspect, field, frames }: { block: SceneBlock; aspect: MotionAspect; field: Field; frames: number }) {
+function BlockBody({
+  block,
+  aspect,
+  field,
+  frames,
+  caption,
+}: {
+  block: SceneBlock
+  aspect: MotionAspect
+  field: Field
+  frames: number
+  caption?: CaptionStyle
+}) {
   switch (block.kind) {
     case "headline":
-      return <HeadlineBody aspect={aspect} field={field} kind="headline" words={block.words} highlightIndex={block.highlightIndex} />
+      return <HeadlineBody aspect={aspect} field={field} caption={caption} kind="headline" words={block.words} highlightIndex={block.highlightIndex} />
     case "quote":
-      return <QuoteBody aspect={aspect} field={field} kind="quote" quote={block.quote} keyphrase={block.keyphrase} author={block.author} />
+      return <QuoteBody aspect={aspect} field={field} caption={caption} kind="quote" quote={block.quote} keyphrase={block.keyphrase} author={block.author} />
     case "slides":
-      return <SlidesBody aspect={aspect} field={field} kind="slides" slides={block.slides} durationInFrames={frames} />
+      return <SlidesBody aspect={aspect} field={field} caption={caption} kind="slides" slides={block.slides} durationInFrames={frames} />
     case "stat":
       return (
         <StatBody
           aspect={aspect}
           field={field}
+          caption={caption}
           kind="stat"
           label={block.label}
           value={block.value}
@@ -53,7 +67,17 @@ function Drift({ frames, children }: { frames: number; children: React.ReactNode
   return <div style={{ transform: `translateY(${y}px)`, width: "100%" }}>{children}</div>
 }
 
-function StoryScenes({ scenes, aspect, field }: { scenes: MotionScene[]; aspect: MotionAspect; field: Field }) {
+function StoryScenes({
+  scenes,
+  aspect,
+  field,
+  caption,
+}: {
+  scenes: MotionScene[]
+  aspect: MotionAspect
+  field: Field
+  caption?: CaptionStyle
+}) {
   const { fps } = useVideoConfig()
   return (
     <Series>
@@ -62,7 +86,7 @@ function StoryScenes({ scenes, aspect, field }: { scenes: MotionScene[]; aspect:
         return (
           <Series.Sequence key={i} durationInFrames={frames} layout="none">
             <Drift frames={frames}>
-              <BlockBody block={s.block} aspect={aspect} field={field} frames={frames} />
+              <BlockBody block={s.block} aspect={aspect} field={field} frames={frames} caption={caption} />
             </Drift>
           </Series.Sequence>
         )
@@ -95,15 +119,22 @@ export function Story({
   brandHandle,
   brandLogo,
   image = null,
+  caption,
   scenes,
   theme = "ink",
   audio = "none",
-}: StoryProps & { aspect: MotionAspect; brandHandle?: string; brandLogo?: string; image?: MotionImage | null }) {
+}: StoryProps & {
+  aspect: MotionAspect
+  brandHandle?: string
+  brandLogo?: string
+  image?: MotionImage | null
+  caption?: CaptionStyle
+}) {
   const track = trackFor(audio)
   return (
     <Scene aspect={aspect} field={theme} brandHandle={brandHandle} brandLogo={brandLogo} image={image}>
       {track ? <Soundtrack file={track.file} /> : null}
-      <StoryScenes scenes={scenes} aspect={aspect} field={theme} />
+      <StoryScenes scenes={scenes} aspect={aspect} field={theme} caption={caption} />
     </Scene>
   )
 }

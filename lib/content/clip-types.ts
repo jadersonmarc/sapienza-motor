@@ -24,15 +24,10 @@ export type CropWindow = {
   scale: number
 }
 
-/** Estilo de legenda configurável (§3.3), integrado aos tokens Margot por default. */
-export type CaptionStyle = {
-  fontFamily?: string
-  fontSizePct?: number // % da altura do vídeo
-  color?: string
-  outline?: boolean
-  position?: "bottom" | "center" | "top"
-  highlightColor?: string
-}
+// Estilo de legenda agora é COMPARTILHADO com o motion (restrito a tokens) — ver
+// caption-style.ts. O clipper usa todos os campos (inclui outline, tamanho, posição).
+import type { CaptionStyle } from "./caption-style"
+export type { CaptionStyle }
 
 /** Card de abertura com o gancho (reusa HeadlineBody do motion como overlay). */
 export type OpeningCard = {

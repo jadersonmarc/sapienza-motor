@@ -2,6 +2,7 @@ import React from "react"
 import { AbsoluteFill, OffthreadVideo, Img, Sequence, useCurrentFrame, useVideoConfig, interpolate } from "remotion"
 import { fieldStyle, fonts, colors } from "../../../lib/brand/tokens"
 import type { ClipAspect, ClipOverlay, ClipProps, TranscriptWord } from "../../../lib/content/clip-types"
+import { captionSizePct, resolveCaption } from "../../../lib/content/caption-style"
 import { HeadlineBody } from "./Headline"
 import { QuoteBody } from "./Quote"
 import { StatBody } from "./Stat"
@@ -58,9 +59,12 @@ const Karaoke: React.FC<{ words: TranscriptWord[]; style: ClipProps["caption"]; 
   // Janela deslizante de ~6 palavras centrada na ativa (legenda legível, não o texto todo).
   const from = Math.max(0, active - 2)
   const line = words.slice(from, from + 6)
-  const size = Math.round(h * ((style.fontSizePct ?? 5.2) / 100))
-  const highlight = style.highlightColor ?? colors.signal.hex
-  const color = style.color ?? "#ffffff"
+  const size = Math.round(h * (captionSizePct(style.size) / 100))
+  // Legenda sobre VÍDEO: default = branco + realce signal (fallbacks do contexto).
+  const { fontFamily, color, highlight } = resolveCaption(style, {
+    textFallback: "#ffffff",
+    highlightFallback: colors.signal.hex,
+  })
   const pos = style.position ?? "bottom"
   const justify = pos === "top" ? "flex-start" : pos === "center" ? "center" : "flex-end"
 
@@ -72,7 +76,7 @@ const Karaoke: React.FC<{ words: TranscriptWord[]; style: ClipProps["caption"]; 
           flexWrap: "wrap",
           justifyContent: "center",
           gap: `${Math.round(size * 0.12)}px ${Math.round(size * 0.32)}px`,
-          fontFamily: fonts.display,
+          fontFamily,
           fontWeight: 700,
           fontSize: size,
           lineHeight: 1.1,
