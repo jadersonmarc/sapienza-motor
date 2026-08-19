@@ -129,11 +129,13 @@ export async function generateDraft(
   const theme = prompt.trim() || "Um tema relevante para a marca e seu público"
 
   if (!isAiConfigured()) {
+    // Título NEUTRO: o prompt/feedback cru NUNCA vira título (senão vaza na capa
+    // on-brand). O tema fica só no corpo, como referência.
     return {
-      title: theme.slice(0, 80),
-      slug: slugify(theme) || "rascunho",
-      excerpt: theme.slice(0, 140),
-      bodyMarkdown: `${theme}\n\n(rascunho gerado sem IA — configure ANTHROPIC_API_KEY)`,
+      title: "Rascunho (IA não configurada)",
+      slug: `rascunho-${Date.now().toString(36)}`,
+      excerpt: "Configure a ANTHROPIC_API_KEY para gerar o conteúdo.",
+      bodyMarkdown: `Tema/brief: ${theme}\n\n(rascunho gerado sem IA — configure ANTHROPIC_API_KEY)`,
       keywords: [],
     }
   }

@@ -92,9 +92,11 @@ export function motionVideoKey(opts: { slug: string; aspect: string }): string {
   return `${PREFIX.motion}/${opts.slug}__${opts.aspect}.mp4`
 }
 
-/** Chave do vídeo-fonte bruto do Clipper: `clips/raw/<sourceId>.<ext>` (retenção 7d). */
-export function clipRawKey(opts: { sourceId: string; ext: string }): string {
-  return `${PREFIX.clip_raw}/${opts.sourceId}.${opts.ext}`
+/** Chave do vídeo-fonte bruto do Clipper: `clips/raw/<ref>.<ext>` (retenção 7d). O
+ *  `ref` é um token único QUALQUER (uuid) — NÃO o sourceId — para o upload poder
+ *  acontecer ANTES da criação da fonte (a fonte nasce já com r2_key_raw setado). */
+export function clipRawKey(opts: { ref: string; ext: string }): string {
+  return `${PREFIX.clip_raw}/${opts.ref}.${opts.ext}`
 }
 
 /** Chave do MP4 de um clipe renderizado: `clips/<slug>.mp4`. */

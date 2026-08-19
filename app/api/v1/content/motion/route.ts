@@ -80,7 +80,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const slug = `${slugify(prompt) || "motion"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
-    createMotionItem(tx, { slug, format: channel, authorId: a.userId }),
+    createMotionItem(tx, { slug, format: channel, authorId: a.userId, brief: prompt }),
   )
 
   await runAfterResponse(async () => {

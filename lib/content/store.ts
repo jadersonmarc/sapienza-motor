@@ -37,6 +37,9 @@ export type ContentItem = {
   clip_aspect?: string | null
   /** versão do editor_config vigente na criação (proveniência p/ métricas). */
   config_version: number | null
+  /** brief/prompt ORIGINAL da peça (persistido na criação) — a regeração combina
+   *  "brief original + feedback" em vez de substituir. null em peças antigas. */
+  brief: string | null
   /** título da revisão atual (presente em listItems; ausente em getItem). */
   title?: string | null
 }
@@ -45,12 +48,12 @@ export type ContentItem = {
  *  o rascunho é escrito depois, em segundo plano (after()). */
 export async function createGeneratingItem(
   tx: Tx,
-  input: { slug: string; format?: string; pilar?: string | null; authorId?: string | null },
+  input: { slug: string; format?: string; pilar?: string | null; authorId?: string | null; brief?: string | null },
 ): Promise<{ id: string }> {
   const [item] = (await tx`
-    INSERT INTO content_items (slug, pilar, format, author_id, generating, config_version)
+    INSERT INTO content_items (slug, pilar, format, author_id, generating, brief, config_version)
     VALUES (${input.slug}, ${input.pilar ?? null}, ${input.format ?? "blog"}, ${input.authorId ?? null}, true,
-            (SELECT config_version FROM editor_config WHERE id = true))
+            ${input.brief ?? null}, (SELECT config_version FROM editor_config WHERE id = true))
     RETURNING id
   `) as unknown as { id: string }[]
   return item
@@ -74,12 +77,12 @@ export async function finishGenerating(tx: Tx, id: string, error: string | null)
  *  Só vira 'queued' quando a geração termina (setRenderStatus). Sem revisão ainda. */
 export async function createMotionItem(
   tx: Tx,
-  input: { slug: string; format?: string; authorId?: string | null },
+  input: { slug: string; format?: string; authorId?: string | null; brief?: string | null },
 ): Promise<{ id: string }> {
   const [item] = (await tx`
-    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status, config_version)
+    INSERT INTO content_items (slug, format, author_id, is_motion, generating, render_status, brief, config_version)
     VALUES (${input.slug}, ${input.format ?? "instagram"}, ${input.authorId ?? null}, true, true, 'preparing',
-            (SELECT config_version FROM editor_config WHERE id = true))
+            ${input.brief ?? null}, (SELECT config_version FROM editor_config WHERE id = true))
     RETURNING id
   `) as unknown as { id: string }[]
   return item
@@ -176,7 +179,15 @@ export type ClipSource = {
  *  em vez de reprocessar/recobrar. */
 export async function createClipSource(
   tx: Tx,
-  input: { kind: "upload" | "url"; origin: string; contentHash?: string | null; authorId?: string | null },
+  input: {
+    kind: "upload" | "url"
+    origin: string
+    contentHash?: string | null
+    authorId?: string | null
+    /** Chave do bruto no R2 — para upload/import a fonte JÁ nasce com o artefato
+     *  existente (regra: nada reivindicável antes do artefato). URL fica null. */
+    r2KeyRaw?: string | null
+  },
 ): Promise<ClipSource> {
   if (input.contentHash) {
     const existing = (await tx`
@@ -185,8 +196,8 @@ export async function createClipSource(
     if (existing[0]) return existing[0]
   }
   const [row] = (await tx`
-    INSERT INTO clip_sources (kind, origin, content_hash, author_id)
-    VALUES (${input.kind}, ${input.origin}, ${input.contentHash ?? null}, ${input.authorId ?? null})
+    INSERT INTO clip_sources (kind, origin, content_hash, author_id, r2_key_raw)
+    VALUES (${input.kind}, ${input.origin}, ${input.contentHash ?? null}, ${input.authorId ?? null}, ${input.r2KeyRaw ?? null})
     RETURNING *
   `) as unknown as ClipSource[]
   return row
@@ -263,22 +274,47 @@ export async function setClipSourceStatus(tx: Tx, id: string, status: string): P
   await tx`UPDATE clip_sources SET status = ${status}, updated_at = now() WHERE id = ${id}`
 }
 
-/** Devolve à fila fontes presas num estágio intermediário há mais de `staleSeconds`
- *  (o worker caiu no meio). Reprocessar é idempotente (horas não recobram). Devolve
- *  quantas foram recolocadas. */
-export async function requeueStaleClipSources(tx: Tx, staleSeconds: number): Promise<number> {
-  const rows = (await tx`
-    UPDATE clip_sources SET status = 'queued', claimed_at = NULL, updated_at = now()
+/** Cuida das fontes presas num estágio intermediário há mais de `staleSeconds` (o
+ *  worker caiu no meio) — job que morre calado é inaceitável. Retoma (volta a
+ *  'queued', incrementando o contador) até `maxRequeues`; passado o limite, FALHA
+ *  com motivo explícito. Devolve as retomadas e as que falharam (com minutes_charged,
+ *  para o chamador estornar as horas). Reprocessar é idempotente (horas não recobram). */
+export async function requeueStaleClipSources(
+  tx: Tx,
+  staleSeconds: number,
+  maxRequeues = 3,
+): Promise<{ requeued: number; failed: { id: string; minutes_charged: number }[] }> {
+  // 1) Presas demais → falha explícita (não reprocessa para sempre).
+  const failed = (await tx`
+    UPDATE clip_sources
+       SET status = 'error',
+           error = 'O processamento não concluiu após várias tentativas. Tente enviar o vídeo novamente.',
+           error_raw = 'stale: excedeu o limite de retomadas', updated_at = now()
+     WHERE status NOT IN ('queued', 'done', 'error')
+       AND updated_at < now() - (${staleSeconds} * interval '1 second')
+       AND requeue_count >= ${maxRequeues}
+    RETURNING id, minutes_charged
+  `) as unknown as { id: string; minutes_charged: number }[]
+  // 2) As demais voltam para a fila (contador +1).
+  const requeued = (await tx`
+    UPDATE clip_sources
+       SET status = 'queued', claimed_at = NULL, requeue_count = requeue_count + 1, updated_at = now()
      WHERE status NOT IN ('queued', 'done', 'error')
        AND updated_at < now() - (${staleSeconds} * interval '1 second')
     RETURNING id
   `) as unknown as { id: string }[]
-  return rows.length
+  return { requeued: requeued.length, failed }
 }
 
-/** Marca a fonte com erro (a esteira retoma/estorna a partir daqui). */
-export async function setClipSourceError(tx: Tx, id: string, error: string): Promise<void> {
-  await tx`UPDATE clip_sources SET status = 'error', error = ${error}, updated_at = now() WHERE id = ${id}`
+/** Marca a fonte com erro. `error` é a mensagem pt-BR ao cliente; `rawError` é o
+ *  cru (yt-dlp/inglês/stack) em campo INTERNO — nunca exibido, mas guardado para
+ *  diagnosticar quebra de extractor depois. */
+export async function setClipSourceError(tx: Tx, id: string, error: string, rawError?: string | null): Promise<void> {
+  await tx`
+    UPDATE clip_sources
+       SET status = 'error', error = ${error}, error_raw = ${rawError ?? error}, updated_at = now()
+     WHERE id = ${id}
+  `
 }
 
 /** Grava os metadados do probe + horas debitadas + janelas de expiração (bruto/JSON). */

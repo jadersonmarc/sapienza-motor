@@ -7,6 +7,7 @@ import { createClipSource } from "@/lib/content/store"
 import { isStorageConfigured, uploadObject } from "@/lib/storage/s3"
 import { clipRawKey } from "@/lib/storage/keys"
 import { pokeClipWorker } from "../poke"
+import { randomUUID } from "node:crypto"
 
 export const runtime = "nodejs"
 
@@ -43,16 +44,16 @@ export async function POST(req: Request): Promise<Response> {
     return json(413, { error: "arquivo acima de 500 MB — importe por URL para vídeos maiores" })
   }
 
-  // Cria a fonte primeiro (para ter o id) e sobe o bruto na chave determinística que
-  // o pipeline resolve (clipRawKey por sourceId). Formato lido do conteúdo, não da
-  // extensão — a chave usa .mp4 mesmo que o upload seja .mov.
-  const source = await withTenant(sql, a.tenantId, (tx) =>
-    createClipSource(tx, { kind: "upload", origin: file.name || "upload", authorId: a.userId }),
-  )
-  const key = clipRawKey({ sourceId: source.id, ext: "mp4" })
+  // REGRA (corrida de claim): sobe o bruto ao R2 PRIMEIRO, depois cria a fonte já
+  // com r2_key_raw setado — assim ela nunca é reivindicável antes do artefato existir.
+  // Formato lido do conteúdo, não da extensão — a chave usa .mp4 mesmo que seja .mov.
+  const key = clipRawKey({ ref: randomUUID(), ext: "mp4" })
   const buffer = Buffer.from(await file.arrayBuffer())
   await uploadObject(a.tenantId, key, buffer, file.type || "video/mp4")
 
+  const source = await withTenant(sql, a.tenantId, (tx) =>
+    createClipSource(tx, { kind: "upload", origin: file.name || "upload", authorId: a.userId, r2KeyRaw: key }),
+  )
   await pokeClipWorker()
   return json(202, { id: source.id, status: source.status })
 }

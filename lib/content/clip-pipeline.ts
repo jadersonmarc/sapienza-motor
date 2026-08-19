@@ -35,6 +35,23 @@ import { slugify } from "@/lib/content/slug"
 // MediaTools, injetável para teste.
 
 export const MAX_SOURCE_SECONDS = 4 * 3600 // teto por arquivo (§5.2): 4h
+
+// Erro de uma etapa da esteira com mensagem AMIGÁVEL (pt-BR, ao cliente) + o cru
+// (interno, para diagnóstico). Usado para não vazar stack/inglês do yt-dlp.
+export class SourceStepError extends Error {
+  constructor(
+    message: string,
+    readonly raw: string,
+  ) {
+    super(message)
+    this.name = "SourceStepError"
+  }
+}
+
+// Assinaturas do bloqueio anti-bot do YouTube (IP de datacenter). Falha ESPERADA.
+function isBotCheck(raw: string): boolean {
+  return /confirm you're not a bot|sign in to confirm|not a robot|429|too many requests/i.test(raw)
+}
 export const RAW_RETENTION_DAYS = 7
 export const ASSET_RETENTION_DAYS = 60
 
@@ -119,11 +136,61 @@ function run(cmd: string, args: string[]): Promise<string> {
   })
 }
 
+/** Atualiza o yt-dlp no boot (extractors quebram semanalmente). Com timeout: se a
+ *  atualização falhar/pendurar, o worker sobe com a versão que tem — nunca deixa de
+ *  subir por causa disso. Best-effort, nunca lança. */
+export function updateYtDlp(timeoutMs = 30000): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false
+    const finish = () => {
+      if (!done) {
+        done = true
+        resolve()
+      }
+    }
+    const t = setTimeout(() => {
+      console.warn("[clip] yt-dlp -U excedeu o tempo; seguindo com a versão instalada")
+      finish()
+    }, timeoutMs)
+    try {
+      const p = spawn("yt-dlp", ["-U"], { stdio: ["ignore", "ignore", "pipe"] })
+      let err = ""
+      p.stderr.on("data", (d) => (err += d))
+      p.on("error", (e) => {
+        console.warn("[clip] yt-dlp -U falhou (segue com a instalada):", e instanceof Error ? e.message : e)
+        clearTimeout(t)
+        finish()
+      })
+      p.on("close", (code) => {
+        if (code !== 0) console.warn(`[clip] yt-dlp -U saiu ${code} (segue com a instalada): ${err.slice(-200)}`)
+        else console.log("[clip] yt-dlp atualizado")
+        clearTimeout(t)
+        finish()
+      })
+    } catch {
+      clearTimeout(t)
+      finish()
+    }
+  })
+}
+
 /** Impl padrão sobre yt-dlp + ffmpeg/ffprobe (presentes na imagem do clip-worker). */
 export const defaultMediaTools: MediaTools = {
   async downloadUrl(origin, destPath) {
     // -f mp4 best; --no-playlist p/ não baixar canal inteiro; saída direta no arquivo.
-    await run("yt-dlp", ["--no-playlist", "-f", "mp4/bestvideo+bestaudio/best", "-o", destPath, origin])
+    // Cookies via secret montado (YTDLP_COOKIES_FILE) mitigam o bot-check — conta
+    // descartável, nunca commitado.
+    const cookies = process.env.YTDLP_COOKIES_FILE
+    const args = [
+      "--no-playlist",
+      ...(cookies ? ["--cookies", cookies] : []),
+      "-f",
+      "mp4/bestvideo+bestaudio/best",
+      "-o",
+      destPath,
+      origin,
+    ]
+    await run("yt-dlp", args)
   },
   async probe(path) {
     const out = await run("ffprobe", [
@@ -178,16 +245,33 @@ export async function runSourcePipeline(
 
   try {
     // 1) Baixa o vídeo-fonte para um arquivo local.
-    const rawKey = source.r2_key_raw ?? clipRawKey({ sourceId, ext: "mp4" })
+    const rawKey = source.r2_key_raw ?? clipRawKey({ ref: sourceId, ext: "mp4" })
     if (source.kind === "url") {
       await withTenant(sql, tenantId, (tx) => setClipSourceStatus(tx, sourceId, "downloading"))
-      await media.downloadUrl(source.origin, tmpVideo)
+      try {
+        await media.downloadUrl(source.origin, tmpVideo)
+      } catch (e) {
+        // yt-dlp é falha ESPERADA (bot-check em IP de datacenter). Mensagem amigável
+        // ao cliente; cru guardado internamente. Upload local é o caminho garantido.
+        const raw = e instanceof Error ? e.message : String(e)
+        const friendly = isBotCheck(raw)
+          ? "Não foi possível baixar deste link (o YouTube bloqueou o download automático). Envie o arquivo de vídeo direto."
+          : "Não foi possível baixar deste link. Envie o arquivo de vídeo direto."
+        throw new SourceStepError(friendly, raw)
+      }
       const buf = await readFile(tmpVideo)
       await uploadObject(tenantId, rawKey, buf, "video/mp4")
     } else {
-      // upload: a API já subiu o bruto no R2; traz para o disco.
+      // upload/import: o artefato já está no R2 (a fonte nasce com r2_key_raw).
       const obj = await getObject(tenantId, rawKey)
-      if (!obj) throw new Error("vídeo-fonte não encontrado no storage")
+      if (!obj) {
+        // Não deveria mais ocorrer (regra do claim), mas logamos tudo para forense.
+        console.error(`[clip][getObject-null] tenant=${tenantId} key=${rawKey} source=${sourceId} kind=${source.kind}`)
+        throw new SourceStepError(
+          "O vídeo enviado não foi encontrado no armazenamento. Tente enviar novamente.",
+          `getObject null: tenant=${tenantId} key=${rawKey}`,
+        )
+      }
       await writeFile(tmpVideo, obj.body)
     }
 
@@ -277,10 +361,14 @@ export async function runSourcePipeline(
     })
     return { clips: created }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    // Estorna as horas: o cliente não paga cota por ingestão que não se concretizou.
+    // Mensagem amigável (pt-BR) ao cliente + cru interno. yt-dlp/getObject viram
+    // SourceStepError; o resto usa a própria mensagem como ambas.
+    const friendly = e instanceof SourceStepError ? e.message : e instanceof Error ? e.message : String(e)
+    const raw = e instanceof SourceStepError ? e.raw : e instanceof Error ? e.message : String(e)
+    // Estorna as horas debitadas (só há débito a partir do probe; falhas de download/
+    // getObject ocorrem ANTES, então charged=0 e nada é estornado — nem foi cobrado).
     if (charged > 0) await refundClipHours(sql, tenantId, charged).catch(() => {})
-    await withTenant(sql, tenantId, (tx) => setClipSourceError(tx, sourceId, msg)).catch(() => {})
+    await withTenant(sql, tenantId, (tx) => setClipSourceError(tx, sourceId, friendly, raw)).catch(() => {})
     throw e
   } finally {
     await unlink(tmpVideo).catch(() => {})

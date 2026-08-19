@@ -1,0 +1,20 @@
+name: Cron · processar clipes
+
+# Rede de SEGURANÇA do clip-worker. A criação/import já cutuca o worker na hora
+# (CLIP_RENDER_URL/trigger); mas se o worker estiver ocupado quando o poke chega, a
+# fonte fica 'queued' sem re-disparo. Este cron (1/min) re-aciona a varredura —
+# processa fontes na fila, recoloca as presas e renderiza os clipes pendentes. Job
+# que morre calado é inaceitável.
+# Secrets: CLIP_WORKER_URL (URL pública do clip-worker), WEBHOOK_SECRET.
+on:
+  schedule:
+    - cron: "*/1 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.CLIP_WORKER_URL }}/trigger" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"

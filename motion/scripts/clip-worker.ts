@@ -19,7 +19,8 @@ import {
   setRenderStatus,
 } from "@/lib/content/store"
 import { getEditorConfig } from "@/lib/content/editor-config"
-import { runSourcePipeline } from "@/lib/content/clip-pipeline"
+import { runSourcePipeline, updateYtDlp } from "@/lib/content/clip-pipeline"
+import { refundClipHours } from "@/lib/content/quota"
 import type { ClipProps } from "@/lib/content/clip-types"
 import { contentTransition } from "@/lib/content/transition"
 import { uploadObject, isStorageConfigured, publicUrlForKey } from "@/lib/storage/s3"
@@ -186,7 +187,17 @@ async function scan(): Promise<{ tenants: number; sources: number; clips: number
   let sources = 0
   let clips = 0
   for (const tenantId of tenants) {
-    await withTenant(sql, tenantId, (tx) => requeueStaleClipSources(tx, STALE_SECONDS)).catch(() => 0)
+    // Rede de segurança: fontes presas voltam para a fila ou falham explicitamente.
+    // As que falham por excesso de retomadas têm as horas estornadas (não fica calado).
+    const stale = await withTenant(sql, tenantId, (tx) => requeueStaleClipSources(tx, STALE_SECONDS)).catch(() => null)
+    if (stale) {
+      for (const f of stale.failed) {
+        if (f.minutes_charged > 0) await refundClipHours(sql, tenantId, f.minutes_charged).catch(() => {})
+      }
+      if (stale.requeued || stale.failed.length) {
+        console.log(`[clip-worker] presas: ${stale.requeued} recolocada(s), ${stale.failed.length} falharam (tenant ${tenantId})`)
+      }
+    }
     sources += await processSources(sql, tenantId)
     clips += await renderQueuedClips(sql, tenantId)
   }
@@ -228,4 +239,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`[clip-worker] ouvindo em :${PORT} (concorrência ${CONCURRENCY}, timeout ${RENDER_TIMEOUT_MS}ms)`)
   getServeUrl().catch((e) => console.error("[clip-worker] warmup do bundle falhou:", e))
+  // Atualiza o yt-dlp no boot (extractors quebram semanalmente). Com timeout: se
+  // falhar, o worker segue com a versão instalada — nunca deixa de subir por isso.
+  updateYtDlp().catch(() => {})
 })

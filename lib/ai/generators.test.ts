@@ -64,10 +64,12 @@ describe("analyzers", () => {
 })
 
 describe("generateDraft fallback", () => {
-  it("sem IA gera rascunho determinístico com keywords vazias", async () => {
+  it("sem IA: título NEUTRO (o prompt cru NUNCA vira título), tema só no corpo", async () => {
     const d = await generateDraft("meu tema de teste")
-    expect(d.title).toContain("meu tema")
-    expect(d.slug).toContain("meu-tema")
+    // O prompt não pode vazar como título (senão aparece na capa on-brand).
+    expect(d.title).not.toContain("meu tema")
+    expect(d.title).toMatch(/IA não configurada/i)
+    expect(d.bodyMarkdown).toContain("meu tema de teste") // referência preservada no corpo
     expect(d.keywords).toEqual([])
   })
 })

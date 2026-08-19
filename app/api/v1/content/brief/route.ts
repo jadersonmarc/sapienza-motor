@@ -48,9 +48,19 @@ export async function POST(req: Request): Promise<Response> {
   // Cria já (generating) e gera o rascunho em segundo plano (after()) — igual ao
   // POST /content: imune a corte de proxy; falha vai p/ generate_error + refund.
   const pilar = body.pilar ?? null
+  // Brief ORIGINAL persistido (texto do brief estruturado) — a regeração o combina
+  // com o feedback depois.
+  const brief = [
+    `Objetivo: ${objetivo}`,
+    body.pontosChave?.trim() ? `Pontos-chave: ${body.pontosChave.trim()}` : "",
+    body.publico?.trim() ? `Público: ${body.publico.trim()}` : "",
+    body.tom?.trim() ? `Tom: ${body.tom.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
   const slug = `${slugify(objetivo) || "rascunho"}-${Date.now().toString(36)}`
   const item = await withTenant(sql, a.tenantId, (tx) =>
-    createGeneratingItem(tx, { slug, pilar, authorId: a.userId }),
+    createGeneratingItem(tx, { slug, pilar, authorId: a.userId, brief }),
   )
 
   await runAfterResponse(async () => {

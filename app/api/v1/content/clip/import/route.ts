@@ -9,6 +9,7 @@ import { isStorageConfigured, uploadObject } from "@/lib/storage/s3"
 import { clipRawKey } from "@/lib/storage/keys"
 import { type CloudProvider, downloadFile, refresh, isConnectorConfigured } from "@/lib/content/clip-connectors"
 import { pokeClipWorker } from "../poke"
+import { randomUUID } from "node:crypto"
 
 export const runtime = "nodejs"
 
@@ -66,10 +67,12 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (buf.byteLength > MAX_BYTES) return json(413, { error: "arquivo acima de 500 MB — use importação por URL" })
 
+  // Mesma regra do upload: R2 primeiro, depois a fonte já com r2_key_raw.
+  const key = clipRawKey({ ref: randomUUID(), ext: "mp4" })
+  await uploadObject(a.tenantId, key, buf, "video/mp4")
   const source = await withTenant(sql, a.tenantId, (tx) =>
-    createClipSource(tx, { kind: "upload", origin: `${provider}:${fileRef}`, authorId: a.userId }),
+    createClipSource(tx, { kind: "upload", origin: `${provider}:${fileRef}`, authorId: a.userId, r2KeyRaw: key }),
   )
-  await uploadObject(a.tenantId, clipRawKey({ sourceId: source.id, ext: "mp4" }), buf, "video/mp4")
   await pokeClipWorker()
   return json(202, { id: source.id })
 }
