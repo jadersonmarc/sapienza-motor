@@ -2,7 +2,15 @@ import { authed, isResponse, json, runAfterResponse } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate } from "@/lib/platform/gating"
-import { getItem, addRevision, markGenerating, finishGenerating, setMotionMeta, setRenderStatus } from "@/lib/content/store"
+import {
+  getItem,
+  getItemWithRevision,
+  addRevision,
+  markGenerating,
+  finishGenerating,
+  setMotionMeta,
+  setRenderStatus,
+} from "@/lib/content/store"
 import { getEditorConfig } from "@/lib/content/editor-config"
 import { assertRegenAllowed, RegenLimitError } from "@/lib/content/regenerate"
 import { generateDraft, type ContentFormat } from "@/lib/ai/generate"
@@ -12,15 +20,20 @@ import { generatePieceImage } from "@/lib/content/piece-image"
 
 export const runtime = "nodejs"
 
-/** Combina o BRIEF ORIGINAL com o feedback de correção. O feedback é INSTRUÇÃO por
- *  cima do brief — NUNCA o substitui. Fallback de peça antiga (brief null, criada
- *  antes de persistirmos o brief): usa só o feedback, SEM inventar um brief falso. */
-function combineBriefFeedback(brief: string | null, feedback: string): string {
+/** Combina o BRIEF ORIGINAL com o feedback de correção — o feedback é INSTRUÇÃO por
+ *  cima do brief, NUNCA o substitui. */
+function briefPlusFeedback(brief: string, feedback: string): string {
   const fb = feedback.trim()
-  if (brief && brief.trim()) {
-    return fb ? `${brief.trim()}\n\nAjuste solicitado (regeração): ${fb}` : brief.trim()
-  }
-  return fb || "regenerar"
+  return fb ? `${brief.trim()}\n\nAjuste solicitado (regeração): ${fb}` : brief.trim()
+}
+
+/** Fallback EXPLÍCITO de peça anterior à migration 0019 (sem brief persistido): a
+ *  regeração ancora no RASCUNHO ATUAL + o ajuste — NÃO inventa um brief falso nem
+ *  descarta o rascunho em silêncio. O console avisa que a peça é antiga. */
+function currentDraftPlusFeedback(draft: string, feedback: string): string {
+  const fb = feedback.trim()
+  const base = `Rascunho atual (peça anterior ao recurso de brief):\n${draft.trim()}`
+  return fb ? `${base}\n\nAjuste solicitado (regeração): ${fb}` : base
 }
 
 // Cutuca o worker de render do MOTION (fire-and-forget) — regeração de motion
@@ -72,9 +85,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const body = (await req.json().catch(() => ({}))) as { prompt?: string }
   const feedback = (body.prompt ?? "").trim()
-  const brief = combineBriefFeedback(item.brief, feedback)
   const isMotion = item.is_motion === true
   const format = (item.format ?? "blog") as ContentFormat
+
+  // Brief original + feedback; peça legada (sem brief) ancora no rascunho ATUAL, com
+  // aviso explícito. Nunca reconstrói um brief inventado.
+  const legacyNoBrief = !item.brief?.trim()
+  let brief: string
+  if (!legacyNoBrief) {
+    brief = briefPlusFeedback(item.brief as string, feedback)
+  } else {
+    const rev = await withTenant(sql, a.tenantId, (tx) => getItemWithRevision(tx, id))
+    const draft = rev ? [rev.title, rev.body_markdown].filter(Boolean).join("\n") : ""
+    brief = currentDraftPlusFeedback(draft, feedback)
+  }
 
   await withTenant(sql, a.tenantId, (tx) => markGenerating(tx, id))
 
@@ -128,5 +152,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     }
   })
 
-  return json(202, { async: true })
+  return json(202, { async: true, legacyNoBrief })
 }
