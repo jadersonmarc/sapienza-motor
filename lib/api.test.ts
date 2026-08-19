@@ -14,6 +14,7 @@ import {
   setRenderStatus,
   getClipProps,
 } from "@/lib/content/store"
+import { reserveClipHours } from "@/lib/content/quota"
 import type { ClipProps } from "@/lib/content/clip-types"
 import type { Sql } from "@/lib/db"
 
@@ -589,6 +590,63 @@ maybe("motor API", () => {
       params: Promise.resolve({ id: clipId }),
     })
     expect(res.status).toBe(409)
+  })
+
+  it("clip delete: exclui o clipe (owner/admin); member 403", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t)
+    const clipId = await withTenant(sql, t, async (tx) => {
+      const src = await createClipSource(tx, { kind: "url", origin: "u" })
+      const item = await createClipItem(tx, { slug: "cx", aspect: "9x16", sourceId: src.id })
+      await addRevision(tx, item.id, { title: "x", bodyMarkdown: "y", ai: false, clipProps: {} })
+      return item.id
+    })
+    const { DELETE } = await import("@/app/api/v1/content/clip/item/[id]/route")
+    const member = await token(t, { role: "member" })
+    const forbidden = await DELETE(req("DELETE", `/api/v1/content/clip/item/${clipId}`, member), {
+      params: Promise.resolve({ id: clipId }),
+    })
+    expect(forbidden.status).toBe(403)
+    const ok = await DELETE(req("DELETE", `/api/v1/content/clip/item/${clipId}`, tok), {
+      params: Promise.resolve({ id: clipId }),
+    })
+    expect(ok.status).toBe(200)
+    const rows = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM content_items WHERE id=${clipId}`)) as unknown as {
+      n: number
+    }[]
+    expect(rows[0].n).toBe(0)
+  })
+
+  it("clip source delete: cascata p/ clipes, SEM estorno de horas", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t)
+    const sourceId = await withTenant(sql, t, async (tx) => {
+      const src = await createClipSource(tx, { kind: "url", origin: "v" })
+      for (const s of ["c1", "c2"]) {
+        const it = await createClipItem(tx, { slug: s, aspect: "9x16", sourceId: src.id })
+        await addRevision(tx, it.id, { title: s, bodyMarkdown: "x", ai: false, clipProps: {} })
+      }
+      return src.id
+    })
+    await reserveClipHours(sql, t, 30) // custo já incorrido
+    const before = await usage(sql, t, "clipper_minutos")
+    const { DELETE } = await import("@/app/api/v1/content/clip/[id]/route")
+    const res = await DELETE(req("DELETE", `/api/v1/content/clip/${sourceId}`, tok), {
+      params: Promise.resolve({ id: sourceId }),
+    })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { deletedClips: number }).deletedClips).toBe(2)
+    const s = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM clip_sources WHERE id=${sourceId}`)) as unknown as {
+      n: number
+    }[]
+    const c = (await withTenant(
+      sql,
+      t,
+      (tx) => tx`SELECT count(*)::int AS n FROM content_items WHERE is_clip AND clip_source_id=${sourceId}`,
+    )) as unknown as { n: number }[]
+    expect(s[0].n).toBe(0)
+    expect(c[0].n).toBe(0)
+    expect(await usage(sql, t, "clipper_minutos")).toBe(before) // horas NÃO estornadas
   })
 
   it("cron close-approval-window exige secret e promove in_review vencido", async () => {

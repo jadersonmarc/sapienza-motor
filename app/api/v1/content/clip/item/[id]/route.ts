@@ -1,18 +1,44 @@
-import { authed, isResponse, json } from "@/lib/api/http"
+import { authed, isResponse, json, requireRole } from "@/lib/api/http"
 import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate, clip4kEnabled } from "@/lib/platform/gating"
 import {
+  getItem,
   getClipEditContext,
   updateClipPropsInPlace,
   setRenderStatus,
   getTranscript,
+  deleteItem,
 } from "@/lib/content/store"
 import { sliceWords } from "@/lib/ai/clip-analysis"
 import type { ClipProps, TranscriptWord } from "@/lib/content/clip-types"
+import { deleteObject } from "@/lib/storage/s3"
+import { clipVideoKey } from "@/lib/storage/keys"
 import { pokeClipWorker } from "../../poke"
 
 export const runtime = "nodejs"
+
+// DELETE /api/v1/content/clip/item/[id] — exclui UM clipe: registro (revisões/social/
+// análises caem por cascade) + o MP4 renderizado no R2. Exclusão LOCAL: se já
+// publicado, NÃO despublica da rede (é responsabilidade do cliente lá). Cota de horas
+// NÃO estorna (custo incorrido) e a peça consumida não volta — não emitimos NADA no
+// outbox, então contadores de uso ficam consistentes. Sem desfazer. owner/admin.
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+  const a = await authed(req)
+  if (isResponse(a)) return a
+  const denied = requireRole(a, ["owner", "admin"])
+  if (denied) return denied
+  const { id } = await ctx.params
+  const sql = getDb()
+
+  const item = await withTenant(sql, a.tenantId, (tx) => getItem(tx, id))
+  if (!item || item.is_clip !== true) return json(404, { error: "clipe não encontrado" })
+
+  // Remove o registro (cascade) e o MP4 do R2 (best-effort — não bloqueia a exclusão).
+  await withTenant(sql, a.tenantId, (tx) => deleteItem(tx, id))
+  await deleteObject(a.tenantId, clipVideoKey({ slug: item.slug })).catch(() => {})
+  return json(200, { ok: true })
+}
 
 const MAX_CLIP_MS = 900_000 // Onda 2: cortes até 15 min
 
