@@ -7,6 +7,7 @@ import {
   CopyObjectCommand,
   CreateBucketCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3"
 
 // Storage multi-tenant: UMA conta S3/R2 (credenciais globais), UM bucket por
@@ -216,6 +217,31 @@ export async function usedBytes(tenantId: string): Promise<number> {
 // Remove um objeto do bucket do tenant.
 export async function deleteObject(tenantId: string, key: string): Promise<void> {
   await getClient().send(new DeleteObjectCommand({ Bucket: bucketFor(tenantId), Key: key }))
+}
+
+/** Exclusão BEST-EFFORT que NÃO lança (não derruba a exclusão do registro) mas
+ *  também NÃO some sem rastro: loga bucket/chave/tenant na falha — a única fonte
+ *  real de órfão no R2. Devolve os bytes liberados (0 se o objeto não existia ou a
+ *  remoção falhou), para somar o espaço recuperado numa limpeza em lote. */
+export async function safeDeleteObject(tenantId: string, key: string, context?: string): Promise<number> {
+  const bucket = bucketFor(tenantId)
+  let size = 0
+  try {
+    const head = await getClient().send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+    size = head.ContentLength ?? 0
+  } catch {
+    // Objeto pode não existir (já removido / nunca subiu) — segue para o delete idempotente.
+  }
+  try {
+    await getClient().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
+    return size
+  } catch (e) {
+    console.error(
+      `[storage][delete-falhou] bucket=${bucket} key=${key} tenant=${tenantId}${context ? ` ctx=${context}` : ""}:`,
+      e instanceof Error ? e.message : e,
+    )
+    return 0
+  }
 }
 
 // Copia um objeto (dentro do bucket do tenant) e devolve a URL pública do destino.

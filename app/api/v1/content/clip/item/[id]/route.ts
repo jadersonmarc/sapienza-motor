@@ -12,7 +12,7 @@ import {
 } from "@/lib/content/store"
 import { sliceWords } from "@/lib/ai/clip-analysis"
 import type { ClipProps, TranscriptWord } from "@/lib/content/clip-types"
-import { deleteObject } from "@/lib/storage/s3"
+import { safeDeleteObject } from "@/lib/storage/s3"
 import { clipVideoKey } from "@/lib/storage/keys"
 import { pokeClipWorker } from "../../poke"
 
@@ -36,8 +36,8 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   // Remove o registro (cascade) e o MP4 do R2 (best-effort — não bloqueia a exclusão).
   await withTenant(sql, a.tenantId, (tx) => deleteItem(tx, id))
-  await deleteObject(a.tenantId, clipVideoKey({ slug: item.slug })).catch(() => {})
-  return json(200, { ok: true })
+  const freedBytes = await safeDeleteObject(a.tenantId, clipVideoKey({ slug: item.slug }), `clip=${id}`)
+  return json(200, { ok: true, freedBytes })
 }
 
 const MAX_CLIP_MS = 900_000 // Onda 2: cortes até 15 min

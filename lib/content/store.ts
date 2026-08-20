@@ -502,6 +502,14 @@ export async function deleteClipSource(tx: Tx, id: string): Promise<void> {
   await tx`DELETE FROM clip_sources WHERE id = ${id}`
 }
 
+/** Fontes em estado de FALHA (status='error'), para a limpeza em lote. Só terminais,
+ *  então nunca colide com job em andamento (integridade do item 4). */
+export async function listFailedClipSources(tx: Tx): Promise<{ id: string; r2_key_raw: string | null }[]> {
+  return (await tx`
+    SELECT id, r2_key_raw FROM clip_sources WHERE status = 'error' ORDER BY created_at
+  `) as unknown as { id: string; r2_key_raw: string | null }[]
+}
+
 /** Fontes cujos clipes serão removidos em ~3 dias e que ainda não foram avisadas. */
 export async function listClipSourcesToWarn(tx: Tx, daysAhead: number): Promise<{ id: string }[]> {
   return (await tx`

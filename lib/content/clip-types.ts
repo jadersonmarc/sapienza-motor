@@ -87,6 +87,11 @@ export type ClipAnalysis = {
   clips: ClipSuggestion[]
 }
 
+/** Estados TERMINAIS de uma fonte: só nesses a exclusão é permitida. Fora deles a
+ *  fonte está em processamento (reivindicada pelo worker) e o DELETE responde 409 —
+ *  excluir no meio deixaria o worker escrevendo num registro morto. */
+export const CLIP_SOURCE_TERMINAL: readonly string[] = ["done", "error"]
+
 /** Estágios da esteira de uma fonte (clip_sources.status). */
 export type ClipSourceStatus =
   | "queued"

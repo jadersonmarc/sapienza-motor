@@ -3,8 +3,9 @@ import { getDb } from "@/lib/db"
 import { withTenant } from "@/lib/platform/tenancy"
 import { clip4kEnabled } from "@/lib/platform/gating"
 import { getClipSource, listClipsForSource, deleteItem, deleteClipSource } from "@/lib/content/store"
-import { deleteObject } from "@/lib/storage/s3"
+import { safeDeleteObject } from "@/lib/storage/s3"
 import { clipVideoKey } from "@/lib/storage/keys"
+import { CLIP_SOURCE_TERMINAL } from "@/lib/content/clip-types"
 
 export const runtime = "nodejs"
 
@@ -43,13 +44,23 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   }))
   if (!source) return json(404, { error: "vídeo não encontrado" })
 
-  // Clipes derivados: registro (cascade) + MP4 no R2.
+  // Item 4 (integridade): só exclui em estado TERMINAL. Em processamento → 409 com
+  // mensagem pt-BR; o worker termina rápido e a exclusão fica disponível em seguida.
+  if (!CLIP_SOURCE_TERMINAL.includes(source.status)) {
+    return json(409, {
+      error: "Este vídeo ainda está em processamento. Você poderá excluí-lo assim que terminar.",
+    })
+  }
+
+  // Clipes derivados: registro (cascade) + MP4 no R2. safeDeleteObject loga falha
+  // (não some sem rastro) e devolve os bytes liberados.
+  let freedBytes = 0
   for (const c of clips) {
     await withTenant(sql, a.tenantId, (tx) => deleteItem(tx, c.id))
-    await deleteObject(a.tenantId, clipVideoKey({ slug: c.slug })).catch(() => {})
+    freedBytes += await safeDeleteObject(a.tenantId, clipVideoKey({ slug: c.slug }), `clip=${c.id}`)
   }
   // Vídeo-fonte bruto (se ainda no R2) + a fonte (cascade da transcrição).
-  if (source.r2_key_raw) await deleteObject(a.tenantId, source.r2_key_raw).catch(() => {})
+  if (source.r2_key_raw) freedBytes += await safeDeleteObject(a.tenantId, source.r2_key_raw, `source=${id}`)
   await withTenant(sql, a.tenantId, (tx) => deleteClipSource(tx, id))
-  return json(200, { ok: true, deletedClips: clips.length })
+  return json(200, { ok: true, deletedClips: clips.length, freedBytes })
 }

@@ -15,7 +15,7 @@ import {
   markClipSourceWarned,
 } from "@/lib/content/store"
 import { emitClipsExpiring } from "@/lib/platform/events"
-import { deleteObject, isStorageConfigured } from "@/lib/storage/s3"
+import { safeDeleteObject, isStorageConfigured } from "@/lib/storage/s3"
 import { clipVideoKey } from "@/lib/storage/keys"
 
 export const runtime = "nodejs"
@@ -40,7 +40,7 @@ export async function POST(req: Request): Promise<Response> {
     // 1) Vídeo-fonte bruto vencido (7d): remove do R2 e limpa a referência.
     const raws = await withTenant(sql, tenantId, (tx) => listExpiredClipRaw(tx))
     for (const r of raws) {
-      if (store) await deleteObject(tenantId, r.r2_key_raw).catch(() => {})
+      if (store) await safeDeleteObject(tenantId, r.r2_key_raw, `retention-raw source=${r.id}`)
       await withTenant(sql, tenantId, (tx) => clearClipRaw(tx, r.id))
       rawDeleted++
     }
@@ -64,7 +64,7 @@ export async function POST(req: Request): Promise<Response> {
     for (const sourceId of expired) {
       const clips = await withTenant(sql, tenantId, (tx) => listClipsForSource(tx, sourceId))
       for (const c of clips) {
-        if (store) await deleteObject(tenantId, clipVideoKey({ slug: c.slug })).catch(() => {})
+        if (store) await safeDeleteObject(tenantId, clipVideoKey({ slug: c.slug }), `retention-clip clip=${c.id}`)
         await withTenant(sql, tenantId, (tx) => deleteItem(tx, c.id))
         clipsDeleted++
       }

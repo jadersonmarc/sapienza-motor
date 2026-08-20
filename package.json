@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "provision": "tsx scripts/provision.ts",
     "validate:channel": "tsx scripts/validate-channel.ts",
+    "audit:clip-orphans": "tsx scripts/audit-clip-orphans.ts",
     "test": "vitest run"
   },
   "dependencies": {

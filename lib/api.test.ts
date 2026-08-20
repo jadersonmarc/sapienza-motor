@@ -626,6 +626,7 @@ maybe("motor API", () => {
         const it = await createClipItem(tx, { slug: s, aspect: "9x16", sourceId: src.id })
         await addRevision(tx, it.id, { title: s, bodyMarkdown: "x", ai: false, clipProps: {} })
       }
+      await tx`UPDATE clip_sources SET status='done' WHERE id=${src.id}` // fonte processada (item 3)
       return src.id
     })
     await reserveClipHours(sql, t, 30) // custo já incorrido
@@ -647,6 +648,56 @@ maybe("motor API", () => {
     expect(s[0].n).toBe(0)
     expect(c[0].n).toBe(0)
     expect(await usage(sql, t, "clipper_minutos")).toBe(before) // horas NÃO estornadas
+  })
+
+  it("clip source delete: 409 em processamento (bloqueia, não cancela)", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t)
+    const sourceId = await withTenant(sql, t, async (tx) => {
+      const src = await createClipSource(tx, { kind: "url", origin: "p" })
+      await tx`UPDATE clip_sources SET status='transcribing' WHERE id=${src.id}`
+      return src.id
+    })
+    const { DELETE } = await import("@/app/api/v1/content/clip/[id]/route")
+    const res = await DELETE(req("DELETE", `/api/v1/content/clip/${sourceId}`, tok), {
+      params: Promise.resolve({ id: sourceId }),
+    })
+    expect(res.status).toBe(409)
+    const n = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM clip_sources WHERE id=${sourceId}`)) as unknown as {
+      n: number
+    }[]
+    expect(n[0].n).toBe(1) // continua lá — nada foi apagado no meio do job
+  })
+
+  it("clip purge-failed: limpa só as fontes com falha, em lote, sem estorno", async () => {
+    const t = await provisionTenant(sql, "pro")
+    const tok = await token(t)
+    const { failedId, okId } = await withTenant(sql, t, async (tx) => {
+      const failed = await createClipSource(tx, { kind: "url", origin: "f" })
+      await tx`UPDATE clip_sources SET status='error', error='x' WHERE id=${failed.id}`
+      const it = await createClipItem(tx, { slug: "pf1", aspect: "9x16", sourceId: failed.id })
+      await addRevision(tx, it.id, { title: "x", bodyMarkdown: "y", ai: false, clipProps: {} })
+      const ok = await createClipSource(tx, { kind: "url", origin: "o" })
+      await tx`UPDATE clip_sources SET status='done' WHERE id=${ok.id}`
+      return { failedId: failed.id, okId: ok.id }
+    })
+    await reserveClipHours(sql, t, 20) // custo já incorrido
+    const before = await usage(sql, t, "clipper_minutos")
+    const { POST } = await import("@/app/api/v1/content/clip/purge-failed/route")
+    const res = await POST(req("POST", "/api/v1/content/clip/purge-failed", tok))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { deletedSources: number; deletedClips: number; freedBytes: number }
+    expect(body.deletedSources).toBe(1)
+    expect(body.deletedClips).toBe(1)
+    const gone = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM clip_sources WHERE id=${failedId}`)) as unknown as {
+      n: number
+    }[]
+    const kept = (await withTenant(sql, t, (tx) => tx`SELECT count(*)::int AS n FROM clip_sources WHERE id=${okId}`)) as unknown as {
+      n: number
+    }[]
+    expect(gone[0].n).toBe(0) // falha removida
+    expect(kept[0].n).toBe(1) // a 'done' permanece
+    expect(await usage(sql, t, "clipper_minutos")).toBe(before) // sem estorno na exclusão
   })
 
   it("cron close-approval-window exige secret e promove in_review vencido", async () => {
