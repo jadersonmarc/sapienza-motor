@@ -20,6 +20,9 @@ export type EditorConfig = {
   logo_url: string
   /** Estilo de legenda default das peças de motion (Brand Kit). null = valores atuais. */
   caption_style: CaptionStyle | null
+  /** Fundos-padrão do tenant (Brand Kit): URLs de mídia (mesmo formato de
+   *  motion_image_url). Peça sem imagem própria pega um por rotação. Máx. 5. */
+  background_keys: string[]
 }
 
 const DEFAULTS: EditorConfig = {
@@ -33,11 +36,12 @@ const DEFAULTS: EditorConfig = {
   handle: "",
   logo_url: "",
   caption_style: null,
+  background_keys: [],
 }
 
 export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
   const rows = (await tx`
-    SELECT system_prompt, tone, themes, format, model, enabled, cadence_days, handle, logo_url, caption_style FROM editor_config WHERE id = true
+    SELECT system_prompt, tone, themes, format, model, enabled, cadence_days, handle, logo_url, caption_style, background_keys FROM editor_config WHERE id = true
   `) as unknown as {
     system_prompt: string
     tone: string
@@ -49,6 +53,7 @@ export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
     handle: string | null
     logo_url: string | null
     caption_style: CaptionStyle | null
+    background_keys: unknown
   }[]
   const r = rows[0]
   if (!r) return { ...DEFAULTS }
@@ -64,13 +69,14 @@ export async function getEditorConfig(tx: Tx): Promise<EditorConfig> {
     handle: r.handle ?? "",
     logo_url: r.logo_url ?? "",
     caption_style: r.caption_style ?? null,
+    background_keys: Array.isArray(r.background_keys) ? (r.background_keys as string[]) : [],
   }
 }
 
 export async function upsertEditorConfig(tx: Tx, cfg: EditorConfig): Promise<void> {
   await tx`
-    INSERT INTO editor_config (id, system_prompt, tone, themes, format, model, enabled, cadence_days, handle, logo_url, caption_style, updated_at)
-    VALUES (true, ${cfg.system_prompt}, ${cfg.tone}, ${tx.json(cfg.themes)}, ${cfg.format}, ${cfg.model}, ${cfg.enabled}, ${cfg.cadence_days}, ${cfg.handle}, ${cfg.logo_url}, ${cfg.caption_style ? tx.json(cfg.caption_style) : null}, now())
+    INSERT INTO editor_config (id, system_prompt, tone, themes, format, model, enabled, cadence_days, handle, logo_url, caption_style, background_keys, updated_at)
+    VALUES (true, ${cfg.system_prompt}, ${cfg.tone}, ${tx.json(cfg.themes)}, ${cfg.format}, ${cfg.model}, ${cfg.enabled}, ${cfg.cadence_days}, ${cfg.handle}, ${cfg.logo_url}, ${cfg.caption_style ? tx.json(cfg.caption_style) : null}, ${tx.json(cfg.background_keys)}, now())
     ON CONFLICT (id) DO UPDATE SET
       system_prompt = EXCLUDED.system_prompt,
       tone = EXCLUDED.tone,
@@ -82,6 +88,7 @@ export async function upsertEditorConfig(tx: Tx, cfg: EditorConfig): Promise<voi
       handle = EXCLUDED.handle,
       logo_url = EXCLUDED.logo_url,
       caption_style = EXCLUDED.caption_style,
+      background_keys = EXCLUDED.background_keys,
       -- Bump a versão só quando muda algo que afeta a GERAÇÃO (prompt/tom/temas/
       -- modelo) — não em toggles de enabled/cadência/handle. Cada peça carimba
       -- esta versão na criação (proveniência p/ correlacionar com métricas).
@@ -93,6 +100,24 @@ export async function upsertEditorConfig(tx: Tx, cfg: EditorConfig): Promise<voi
         ) THEN 1 ELSE 0 END,
       updated_at = now()
   `
+}
+
+/** Escolhe o próximo fundo-padrão do Brand Kit por ROTAÇÃO determinística (round-robin):
+ *  avança o cursor ATOMICAMENTE e devolve a URL no índice. null se não há fundos. Como
+ *  o cursor anda de 1 em 1, peças consecutivas não caem na mesma imagem enquanto houver
+ *  mais de uma. Chamado na criação da peça (estável em re-render). */
+export async function pickBrandBackground(tx: Tx): Promise<string | null> {
+  const rows = (await tx`
+    UPDATE editor_config SET background_cursor = background_cursor + 1
+     WHERE id = true
+     RETURNING background_cursor, background_keys
+  `) as unknown as { background_cursor: number; background_keys: unknown }[]
+  const r = rows[0]
+  if (!r) return null
+  const keys = Array.isArray(r.background_keys) ? (r.background_keys as string[]) : []
+  if (keys.length === 0) return null
+  const idx = (r.background_cursor - 1) % keys.length
+  return keys[idx] ?? null
 }
 
 /** Já passou o intervalo da cadência desde a última geração automática? (sem

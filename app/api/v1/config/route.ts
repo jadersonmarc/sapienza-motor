@@ -49,6 +49,13 @@ export async function PUT(req: Request): Promise<Response> {
     })(),
     // Estilo de legenda default do motion (Brand Kit): só tokens; inválido/vazio = null.
     caption_style: sanitizeCaptionStyle(body.caption_style),
+    // Fundos-padrão do Brand Kit: só URLs de mídia do próprio tenant (https + /api/media/),
+    // deduplicadas, no máximo 5. Qualquer outra coisa é descartada.
+    background_keys: (Array.isArray(body.background_keys) ? body.background_keys : [])
+      .map((u) => String(u).trim())
+      .filter((u) => /^https:\/\//i.test(u) && u.includes("/api/media/"))
+      .filter((u, i, arr) => arr.indexOf(u) === i)
+      .slice(0, 5),
   }
 
   const sql = getDb()

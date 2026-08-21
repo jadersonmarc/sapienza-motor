@@ -4,6 +4,7 @@ import { withTenant } from "@/lib/platform/tenancy"
 import { canOperate, motionEnabled } from "@/lib/platform/gating"
 import { createMotionItem, addRevision, setMotionMeta, finishGenerating, setRenderStatus } from "@/lib/content/store"
 import { assertReadyToCreate, connectedPlatforms, NotReadyError } from "@/lib/content/readiness"
+import { pickBrandBackground } from "@/lib/content/editor-config"
 import { generateMotion } from "@/lib/ai/motion"
 import { MOTION_ARCHETYPES, type MotionArchetype } from "@/lib/content/motion-types"
 import { MOTION_MOODS, type MotionMood } from "@/lib/content/motion-audio"
@@ -93,9 +94,12 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const slug = `${slugify(prompt) || "motion"}-${Date.now().toString(36)}`
-  const item = await withTenant(sql, a.tenantId, (tx) =>
-    createMotionItem(tx, { slug, format: channel, authorId: a.userId, brief: prompt, imageUrl, captionStyle }),
-  )
+  const item = await withTenant(sql, a.tenantId, async (tx) => {
+    // Precedência: imagem da peça (item 7) > fundo-padrão do Brand Kit por rotação.
+    // Sem nenhum dos dois → null → campo chapado, como hoje.
+    const bg = imageUrl ?? (await pickBrandBackground(tx))
+    return createMotionItem(tx, { slug, format: channel, authorId: a.userId, brief: prompt, imageUrl: bg, captionStyle })
+  })
 
   await runAfterResponse(async () => {
     try {

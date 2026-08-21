@@ -18,7 +18,7 @@ import {
   claimNextClip,
   countRenderingClips,
 } from "@/lib/content/store"
-import { getEditorConfig, upsertEditorConfig } from "@/lib/content/editor-config"
+import { getEditorConfig, upsertEditorConfig, pickBrandBackground } from "@/lib/content/editor-config"
 import { contentTransition } from "@/lib/content/transition"
 import { regenerate, RegenLimitError } from "@/lib/content/regenerate"
 import { connectChannel, publishItem, retryFailedChannels, ChannelLimitError, PartialPublishError, type Drivers } from "@/lib/channels/registry"
@@ -256,7 +256,7 @@ maybe("motor data plane", () => {
   it("editor_config: defaults quando vazio; upsert persiste", async () => {
     const t = await provisionTenant(sql, "pro")
     const def = await withTenant(sql, t, (tx) => getEditorConfig(tx))
-    expect(def).toEqual({ system_prompt: "", tone: "", themes: [], format: "blog", model: null, enabled: true, cadence_days: 7, handle: "", logo_url: "", caption_style: null })
+    expect(def).toEqual({ system_prompt: "", tone: "", themes: [], format: "blog", model: null, enabled: true, cadence_days: 7, handle: "", logo_url: "", caption_style: null, background_keys: [] })
 
     await withTenant(sql, t, (tx) =>
       upsertEditorConfig(tx, {
@@ -270,6 +270,7 @@ maybe("motor data plane", () => {
         handle: "@marca",
         logo_url: "https://cdn/logo.png",
         caption_style: { font: "sans", highlight: "signal" },
+        background_keys: ["https://m/api/media/t/editor/a.jpg", "https://m/api/media/t/editor/b.jpg"],
       }),
     )
     const got = await withTenant(sql, t, (tx) => getEditorConfig(tx))
@@ -281,6 +282,15 @@ maybe("motor data plane", () => {
     expect(got.logo_url).toBe("https://cdn/logo.png")
     expect(got.handle).toBe("@marca")
     expect(got.caption_style).toEqual({ font: "sans", highlight: "signal" })
+    expect(got.background_keys).toHaveLength(2)
+
+    // Rotação determinística: a a b b a → nunca repete consecutivo (2 imagens).
+    const a1 = await withTenant(sql, t, (tx) => pickBrandBackground(tx))
+    const a2 = await withTenant(sql, t, (tx) => pickBrandBackground(tx))
+    const a3 = await withTenant(sql, t, (tx) => pickBrandBackground(tx))
+    expect(a1).not.toBe(a2)
+    expect(a2).not.toBe(a3)
+    expect(a1).toBe(a3) // round-robin com 2 imagens
   })
 
   it("isolamento: conteúdo não vaza entre tenants", async () => {

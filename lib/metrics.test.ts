@@ -91,7 +91,7 @@ maybe("métricas (série temporal)", () => {
 
   const cfg = (over: Partial<EditorConfig>): EditorConfig => ({
     system_prompt: "", tone: "", themes: [], format: "blog", model: null,
-    enabled: true, cadence_days: 7, handle: "", logo_url: "", caption_style: null, ...over,
+    enabled: true, cadence_days: 7, handle: "", logo_url: "", caption_style: null, background_keys: [], ...over,
   })
 
   it("config_version: carimba na criação e bumpa só quando muda campo de geração", async () => {
