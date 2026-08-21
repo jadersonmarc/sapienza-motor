@@ -24,7 +24,6 @@ jobs:
           --health-timeout 3s --health-retries 10
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/sapienza_test?sslmode=disable
-      MOTOR_ENC_KEY: dGVzdC10ZXN0LXRlc3QtdGVzdC10ZXN0LXRlc3QtMDA=
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -32,6 +31,11 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
+      # Chave AES EFÊMERA só para os testes rodarem — gerada por execução, nunca
+      # versionada (não é a chave de produção, que vive no Coolify). Evita literal
+      # com cara de segredo no repo público.
+      - name: Chave de teste efêmera
+        run: echo "MOTOR_ENC_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Typecheck

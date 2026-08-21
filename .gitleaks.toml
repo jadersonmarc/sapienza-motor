@@ -1,0 +1,13 @@
+# Config do gitleaks (repo público). Mantém as regras padrão e adiciona uma allowlist
+# ESTREITA para um falso-positivo conhecido: uma chave AES DUMMY usada só nos testes
+# do CI. Ela decodifica para "test-test-test-test-test-test-00" (32 bytes) e NUNCA foi
+# a chave de produção (essa vive no Coolify, fora do git). A allowlist casa o valor
+# exato — em qualquer commit da história — para o scan não falhar por causa dele.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fixture de teste do CI: MOTOR_ENC_KEY dummy (base64 de 'test-test-...-00'), não é segredo de produção."
+regexes = [
+  '''dGVzdC10ZXN0LXRlc3QtdGVzdC10ZXN0LXRlc3QtMDA=''',
+]
