@@ -1,5 +1,7 @@
 import { json } from "@/lib/api/http"
 import { cronAuthorized } from "@/lib/platform/webhook"
+import { emitCronRun } from "@/lib/platform/events"
+import { splitCronErrors } from "@/lib/platform/net-error"
 import { getDb } from "@/lib/db"
 import { activeTenants } from "@/lib/platform/gating"
 import { withTenant } from "@/lib/platform/tenancy"
@@ -28,5 +30,9 @@ export async function POST(req: Request): Promise<Response> {
       }
     }
   }
+  const { appErrors, connErrors } = splitCronErrors(errors)
+  await emitCronRun(sql, { job: "close-approval-window", processed: published, appErrors, connErrors }).catch((e) =>
+    console.error("[cron] emitCronRun falhou:", e),
+  )
   return json(200, { published, errors })
 }

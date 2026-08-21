@@ -27,6 +27,30 @@ export async function emitUsageRecorded(tx: Tx, args: EmitArgs): Promise<void> {
   `
 }
 
+// Tenant sentinel (nil uuid) para eventos GLOBAIS — os crons não são por-tenant.
+// Consumidores por-tenant filtram por type, então nunca tocam este tenant.
+const NIL_TENANT = "00000000-0000-0000-0000-000000000000"
+
+type CronRunArgs = { job: string; processed: number; appErrors: number; connErrors: number }
+
+/** Append de CronRan no outbox: um cron do Motor terminou uma execução. Registra
+ *  quantos ITENS processou e separa erro de APLICAÇÃO de erro de CONEXÃO (item 3/5) —
+ *  o painel super distingue "rodou e não tinha nada" de "não rodou" (ausência de run)
+ *  sem abrir o GitHub. Global (nil tenant). Best-effort no chamador. */
+export async function emitCronRun(sql: Sql, args: CronRunArgs): Promise<void> {
+  const payload = {
+    job: args.job,
+    processed: args.processed,
+    app_errors: args.appErrors,
+    conn_errors: args.connErrors,
+    at: new Date().toISOString(),
+  }
+  await sql`
+    INSERT INTO public.event_outbox (type, tenant_id, produto, payload)
+    VALUES ('CronRan', ${NIL_TENANT}::uuid, ${PRODUTO}, ${sql.json(payload)})
+  `
+}
+
 type PublishFailedArgs = {
   tenantId: string
   itemId: string

@@ -1,5 +1,7 @@
 import { json } from "@/lib/api/http"
 import { cronAuthorized } from "@/lib/platform/webhook"
+import { emitCronRun } from "@/lib/platform/events"
+import { splitCronErrors } from "@/lib/platform/net-error"
 import { getDb } from "@/lib/db"
 import { activeTenants } from "@/lib/platform/gating"
 import { collectMetrics, collectChannelMetrics } from "@/lib/metrics"
@@ -30,5 +32,9 @@ export async function POST(req: Request): Promise<Response> {
       errors.push({ tenantId, platform: "", error: String(e instanceof Error ? e.message : e) })
     }
   }
+  const { appErrors, connErrors } = splitCronErrors(errors)
+  await emitCronRun(sql, { job: "collect-metrics", processed: written, appErrors, connErrors }).catch((e) =>
+    console.error("[cron] emitCronRun falhou:", e),
+  )
   return json(200, { written, accounts, errors })
 }

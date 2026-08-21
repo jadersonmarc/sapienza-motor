@@ -1,5 +1,7 @@
 import { json } from "@/lib/api/http"
 import { cronAuthorized } from "@/lib/platform/webhook"
+import { emitCronRun } from "@/lib/platform/events"
+import { splitCronErrors } from "@/lib/platform/net-error"
 import { getDb } from "@/lib/db"
 import { activeTenants } from "@/lib/platform/gating"
 import { refreshExpiringChannels } from "@/lib/channels/registry"
@@ -22,5 +24,9 @@ export async function POST(req: Request): Promise<Response> {
       errors.push({ tenantId, error: e instanceof Error ? e.message : String(e) })
     }
   }
+  const { appErrors, connErrors } = splitCronErrors(errors)
+  await emitCronRun(sql, { job: "refresh-tokens", processed: tenants.length - errors.length, appErrors, connErrors }).catch(
+    (e) => console.error("[cron] emitCronRun falhou:", e),
+  )
   return json(200, { tenants: tenants.length, errors })
 }

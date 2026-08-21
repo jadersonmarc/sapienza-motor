@@ -720,5 +720,14 @@ maybe("motor API", () => {
     const data = (await res.json()) as { published: number }
     expect(data.published).toBeGreaterThanOrEqual(1)
     expect(await usage(sql, t, "peca")).toBeGreaterThanOrEqual(1)
+
+    // item 5: o cron registrou a execução no outbox (CronRan), com contagem.
+    const cron = (await sql`
+      SELECT payload FROM public.event_outbox
+       WHERE type='CronRan' AND payload->>'job'='close-approval-window' ORDER BY id DESC LIMIT 1
+    `) as unknown as { payload: { job: string; processed: number; app_errors: number; conn_errors: number } }[]
+    expect(cron[0]?.payload.job).toBe("close-approval-window")
+    expect(cron[0]?.payload.processed).toBeGreaterThanOrEqual(1)
+    expect(cron[0]?.payload.conn_errors).toBe(0)
   })
 })
