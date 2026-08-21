@@ -15,5 +15,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          curl -fsS -X POST "${{ secrets.MOTION_URL }}/trigger" \
+          curl -fsS --retry 6 --retry-connrefused --retry-all-errors --retry-max-time 180 --connect-timeout 20 -X POST "${{ secrets.MOTION_URL }}/trigger" \
             -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"

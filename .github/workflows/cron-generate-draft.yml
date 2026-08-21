@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          curl -fsS -X POST "${{ secrets.MOTOR_URL }}/api/cron/generate-draft" \
+          curl -fsS --retry 6 --retry-connrefused --retry-all-errors --retry-max-time 180 --connect-timeout 20 -X POST "${{ secrets.MOTOR_URL }}/api/cron/generate-draft" \
             -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}" \
             -H "content-type: application/json" \
             -d "{\"prompt\":\"${{ github.event.inputs.prompt }}\"}"

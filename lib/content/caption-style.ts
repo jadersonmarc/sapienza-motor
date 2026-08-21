@@ -7,7 +7,10 @@
 // - tamanho / posição: usados pelo CLIPPER; o Motion (8a) NÃO os aplica (layout
 //   bespoke dos presets fica intocado).
 // - outline: extensão do clipper (contraste sobre vídeo).
-import { fieldStyle, fonts, colors, type Field } from "@/lib/brand/tokens"
+// Import RELATIVO (não alias @/): este arquivo é bundlado pelo Remotion via as
+// composições, e o webpack do bundle não resolve @/ (só o tsc resolve). Manter
+// relativo como os demais arquivos que entram no bundle.
+import { fieldStyle, fonts, colors, type Field } from "../brand/tokens"
 
 export type CaptionFont = "display" | "sans" | "mono"
 export type CaptionColor = "default" | "accent" | "signal"

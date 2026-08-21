@@ -14,10 +14,10 @@ import { listQueuedMotion, getMotionProps, setItemVideo, setItemVideos, setRende
 import { getEditorConfig } from "@/lib/content/editor-config"
 import { trackFor } from "@/lib/content/motion-audio"
 import { fanoutAspects, type MotionAspect, type StoryProps } from "@/lib/content/motion-types"
-import { scrimForPreset } from "@/lib/content/motion-image"
+import { scrimForPreset, mediaKeyFromUrl, imageDataUri } from "@/lib/content/motion-image"
 import type { CaptionStyle } from "@/lib/content/caption-style"
 import { contentTransition } from "@/lib/content/transition"
-import { uploadObject, isStorageConfigured } from "@/lib/storage/s3"
+import { uploadObject, getObject, isStorageConfigured } from "@/lib/storage/s3"
 import { motionVideoKey } from "@/lib/storage/keys"
 import { secretMatches } from "@/lib/platform/webhook"
 import { compositionId } from "../src/Root"
@@ -70,11 +70,10 @@ async function resolveLogo(url: string | null | undefined): Promise<string> {
 // Luminância média (0..1) da imagem via ffmpeg (downscale 1×1 → 1 pixel RGB). Robusto
 // (decodifica jpg/png/webp). Falha/timeout → 0.5 (neutro → scrim fica no piso). O
 // bundle do @remotion/renderer traz o ffmpeg; a imagem tem ffmpeg CLI no Dockerfile.
-async function imageLuminance(url: string): Promise<number> {
+// Luminância média (0..1) a partir dos BYTES da imagem — sem depender de URL/rede
+// (o worker já tem os bytes do R2). ffmpeg reduz a 1px e lê o RGB.
+async function luminanceFromBytes(bytes: Buffer): Promise<number> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
-    if (!res.ok) return 0.5
-    const bytes = Buffer.from(await res.arrayBuffer())
     const rgb = await new Promise<Buffer>((resolve, reject) => {
       const p = spawn("ffmpeg", ["-i", "pipe:0", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], {
         stdio: ["pipe", "pipe", "ignore"],
@@ -136,17 +135,22 @@ async function renderOne(sql: ReturnType<typeof getDb>, tenantId: string, item: 
     // (o rodapé cai no monograma da inicial do handle).
     const brandLogo = await resolveLogo(logoUrl)
 
-    // Imagem de fundo (item 7): mesma robustez. Se a URL não resolver (objeto sumiu,
-    // R2 fora), renderiza SEM imagem — a peça sai como hoje, que é válido. Scrim é
-    // adaptativo por luminância (imagem clara → scrim mais forte).
+    // Imagem de fundo (item 7): buscada DIRETO do R2 pela chave (getObject), não por
+    // HEAD numa URL pública que o worker pode não alcançar — menos salto, menos coisa
+    // p/ quebrar. Vai ao render como data URI (o Chromium do Remotion não busca rede).
+    // Objeto ausente/chave inválida → renderiza SEM imagem (válido) e loga o motivo.
     let image: { url: string; scrimOpacity: number } | null = null
     if (imageUrlDb) {
-      const resolved = await resolveLogo(imageUrlDb)
-      if (!resolved) {
-        console.warn(`[motion-worker] imagem da peça ${item.id} não resolveu — renderizando sem imagem`)
+      const key = mediaKeyFromUrl(imageUrlDb)
+      const obj = key ? await getObject(tenantId, key) : null
+      if (!obj) {
+        console.warn(
+          `[motion-worker] imagem da peça ${item.id} não encontrada no R2 (key=${key ?? "url inválida"}) — renderizando sem imagem`,
+        )
       } else {
-        const lum = await imageLuminance(resolved)
-        image = { url: resolved, scrimOpacity: scrimForPreset(preset, lum) }
+        const buf = Buffer.from(obj.body)
+        const lum = await luminanceFromBytes(buf)
+        image = { url: imageDataUri(obj.contentType, buf), scrimOpacity: scrimForPreset(preset, lum) }
       }
     }
 
